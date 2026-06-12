@@ -1,5 +1,9 @@
 # live-markdown-preview
 
+[Live demo](https://live-markdown-preview.igor-markin.workers.dev/)
+
+![Live Markdown Preview app interface](docs/assets/readme-hero.webp)
+
 A fast local-first live preview tool for Markdown files.
 
 ## Features
