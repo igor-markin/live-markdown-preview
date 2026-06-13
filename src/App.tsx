@@ -1,8 +1,19 @@
 import type { JSX } from "preact";
-import { FileText, PanelLeft } from "lucide-preact";
+import {
+  Check,
+  Columns2,
+  Eye,
+  FileText,
+  PanelLeft,
+  PanelLeftClose,
+  Plus,
+  Redo2,
+  Trash2,
+  Undo2,
+  X
+} from "lucide-preact";
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { MarkdownEditorHandle } from "./components/MarkdownEditor";
-import { Modal } from "./components/Modal";
 import { StatusBar } from "./components/StatusBar";
 import { Toolbar } from "./components/Toolbar";
 import { copyTextToClipboard } from "./clipboard";
@@ -10,14 +21,26 @@ import { DEFAULT_MARKDOWN, DEFAULT_PREFERENCES } from "./defaults";
 import { useMarkdownRender } from "./hooks/useMarkdownRender";
 import { getCopyableHtml } from "./markdown/previewHtml";
 import { clampSplitRatio } from "./preferences";
-import { createAppStorage, DraftConflictError, normalizeDraftRecord, type DraftRecord } from "./storage";
-import type { MobileMode, Preferences, SaveState, Theme } from "./types";
+import {
+  createAppStorage,
+  DraftConflictError,
+  normalizeFileRecord,
+  StorageUnavailableError,
+  type FileRecord
+} from "./storage";
+import type { Preferences, SaveState, Theme, ViewMode } from "./types";
 
-type ModalState = null | "about";
 type ConflictAction = null | "reload";
 type MarkdownEditorComponent = typeof import("./components/MarkdownEditor").MarkdownEditor;
+type PendingSave = {
+  fileId: string;
+  markdown: string;
+  expectedRevision: number;
+};
 
 const ACTION_FEEDBACK_MS = 650;
+const AUTOSAVE_DELAY_MS = 300;
+const SPLIT_INDICATOR_MS = 900;
 const GITHUB_URL = "https://github.com/igor-markin/live-markdown-preview";
 const DRAFT_CHANNEL_NAME = "live-markdown-preview:draft";
 
@@ -26,31 +49,45 @@ export function App() {
   const loadedRef = useRef(false);
   const editorHandleRef = useRef<MarkdownEditorHandle | null>(null);
   const actionFeedbackTimeoutRef = useRef<number | null>(null);
+  const autosaveTimeoutRef = useRef<number | null>(null);
+  const splitIndicatorTimeoutRef = useRef<number | null>(null);
   const workspaceRef = useRef<HTMLElement | null>(null);
+  const helpDialogRef = useRef<HTMLDialogElement | null>(null);
+  const helpCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   const clientIdRef = useRef(createClientId());
-  const currentDraftRevisionRef = useRef(0);
-  const remoteDraftRef = useRef<DraftRecord | null>(null);
-  const skipNextAutosaveRef = useRef(false);
+  const currentFileRevisionRef = useRef(0);
+  const fileRevisionsRef = useRef<Map<string, number>>(new Map());
+  const activeFileIdRef = useRef<string | null>(null);
+  const remoteFileRef = useRef<FileRecord | null>(null);
   const storageWritePausedRef = useRef(false);
   const markdownRef = useRef(DEFAULT_MARKDOWN);
   const saveStateRef = useRef<SaveState>("loading");
   const broadcastRef = useRef<BroadcastChannel | null>(null);
-  const modalReturnFocusRef = useRef<HTMLElement | null>(null);
+  const pendingSavesRef = useRef<Map<string, PendingSave>>(new Map());
+  const inFlightSaveRef = useRef<PendingSave | null>(null);
+  const flushPendingSaveRef = useRef<() => void>(() => undefined);
 
   const [markdown, setMarkdown] = useState(DEFAULT_MARKDOWN);
   const [EditorComponent, setEditorComponent] = useState<MarkdownEditorComponent | null>(null);
   const [theme, setTheme] = useState<Theme>(DEFAULT_PREFERENCES.theme);
   const [outlineVisible, setOutlineVisible] = useState(DEFAULT_PREFERENCES.outlineVisible);
   const [splitRatio, setSplitRatio] = useState(DEFAULT_PREFERENCES.splitRatio);
-  const [mobileMode, setMobileMode] = useState<MobileMode>("editor");
+  const [viewMode, setViewMode] = useState<ViewMode>("split");
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [files, setFiles] = useState<FileRecord[]>([]);
+  const [activeFileId, setActiveFileId] = useState<string | null>(null);
+  const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("loading");
   const [editorLoadFailed, setEditorLoadFailed] = useState(false);
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [actionStatus, setActionStatus] = useState("");
-  const [modal, setModal] = useState<ModalState>(null);
   const [pendingConflictAction, setPendingConflictAction] = useState<ConflictAction>(null);
   const [isResizing, setIsResizing] = useState(false);
+  const [splitIndicatorVisible, setSplitIndicatorVisible] = useState(false);
 
+  const effectiveViewMode = isMobileViewport && viewMode === "split" ? "markdown" : viewMode;
   const wordCount = useMemo(() => countWords(markdown), [markdown]);
 
   const completeAction = useCallback((actionId: string, message: string) => {
@@ -77,27 +114,236 @@ export function App() {
     renderState
   } = useMarkdownRender(markdown, completeAction);
 
-  const closeModal = useCallback(() => {
-    setModal(null);
+  const appendTechnicalError = useCallback(
+    (type: string, message: string, source?: string) => {
+      void storageRef.current
+        .appendErrorLog({ type, message, source })
+        .catch(() => {
+          // The diagnostic log is best-effort and must not create more user-visible failures.
+        });
+    },
+    []
+  );
 
-    window.setTimeout(() => {
-      modalReturnFocusRef.current?.focus();
-      modalReturnFocusRef.current = null;
-    }, 0);
+  const captureStorageError = useCallback(
+    (error: unknown, source: string) => {
+      appendTechnicalError(
+        error instanceof StorageUnavailableError && error.reason === "timeout" ? "storage timeout" : "storage unavailable",
+        getErrorMessage(error, "Storage unavailable"),
+        source
+      );
+    },
+    [appendTechnicalError]
+  );
+
+  const upsertFile = useCallback((record: FileRecord) => {
+    fileRevisionsRef.current.set(record.id, record.revision);
+    setFiles((currentFiles) => {
+      const index = currentFiles.findIndex((file) => file.id === record.id);
+
+      if (index === -1) {
+        return [...currentFiles, record];
+      }
+
+      const nextFiles = [...currentFiles];
+      nextFiles[index] = record;
+
+      return nextFiles;
+    });
   }, []);
+
+  const applyActiveFile = useCallback(
+    (record: FileRecord) => {
+      activeFileIdRef.current = record.id;
+      currentFileRevisionRef.current = record.revision;
+      fileRevisionsRef.current.set(record.id, record.revision);
+      remoteFileRef.current = null;
+      storageWritePausedRef.current = false;
+      markdownRef.current = record.markdown;
+
+      setActiveFileId(record.id);
+      setPendingConflictAction(null);
+      setMarkdown(record.markdown);
+      setSaveState("saved");
+      upsertFile(record);
+    },
+    [upsertFile]
+  );
+
+  const flushPendingSave = useCallback(() => {
+    if (inFlightSaveRef.current || storageWritePausedRef.current || saveStateRef.current === "conflict") {
+      return;
+    }
+
+    const pendingSave = takePendingSave(pendingSavesRef.current, activeFileIdRef.current);
+
+    if (!pendingSave) {
+      return;
+    }
+
+    inFlightSaveRef.current = pendingSave;
+
+    void storageRef.current
+      .saveFileRecord(pendingSave.fileId, pendingSave.markdown, {
+        clientId: clientIdRef.current,
+        expectedRevision: pendingSave.expectedRevision
+      })
+      .then((record) => {
+        const completedSave = inFlightSaveRef.current;
+        inFlightSaveRef.current = null;
+
+        if (!completedSave || completedSave.fileId !== record.id) {
+          flushPendingSaveRef.current();
+          return;
+        }
+
+        fileRevisionsRef.current.set(record.id, record.revision);
+        upsertFile(record);
+        broadcastFile(record, broadcastRef.current);
+
+        const queuedSave = pendingSavesRef.current.get(record.id);
+
+        if (queuedSave) {
+          pendingSavesRef.current.set(record.id, {
+            ...queuedSave,
+            expectedRevision: record.revision
+          });
+        }
+
+        if (activeFileIdRef.current === record.id) {
+          currentFileRevisionRef.current = record.revision;
+
+          if (markdownRef.current === record.markdown && !pendingSavesRef.current.has(record.id)) {
+            setPendingConflictAction(null);
+            setSaveState("saved");
+          } else {
+            setSaveState("saving");
+          }
+        }
+
+        flushPendingSaveRef.current();
+      })
+      .catch((error: unknown) => {
+        const failedSave = inFlightSaveRef.current;
+        inFlightSaveRef.current = null;
+
+        if (!failedSave) {
+          flushPendingSaveRef.current();
+          return;
+        }
+
+        if (error instanceof DraftConflictError) {
+          const storedRecord = error.storedRecord;
+
+          if (storedRecord) {
+            fileRevisionsRef.current.set(storedRecord.id, storedRecord.revision);
+            upsertFile(storedRecord);
+
+            const queuedSave = pendingSavesRef.current.get(storedRecord.id);
+
+            if (queuedSave) {
+              pendingSavesRef.current.set(storedRecord.id, {
+                ...queuedSave,
+                expectedRevision: storedRecord.revision
+              });
+            }
+          }
+
+          if (activeFileIdRef.current !== failedSave.fileId) {
+            flushPendingSaveRef.current();
+            return;
+          }
+
+          if (storedRecord?.markdown === markdownRef.current) {
+            currentFileRevisionRef.current = storedRecord.revision;
+            remoteFileRef.current = null;
+            setPendingConflictAction(null);
+            setSaveState("saved");
+            flushPendingSaveRef.current();
+            return;
+          }
+
+          remoteFileRef.current = storedRecord;
+          setPendingConflictAction(null);
+          setSaveState("conflict");
+          completeAction("conflict", "Draft changed in another tab");
+          return;
+        }
+
+        captureStorageError(error, "autosave");
+        storageWritePausedRef.current = true;
+        pendingSavesRef.current.clear();
+        setSaveState("unavailable");
+      });
+  }, [captureStorageError, completeAction, upsertFile]);
+
+  flushPendingSaveRef.current = flushPendingSave;
+
+  const scheduleAutosave = useCallback((fileId: string, nextMarkdown: string) => {
+    if (!loadedRef.current || storageWritePausedRef.current || saveStateRef.current === "conflict") {
+      return;
+    }
+
+    const expectedRevision = fileRevisionsRef.current.get(fileId) ?? currentFileRevisionRef.current;
+
+    pendingSavesRef.current.set(fileId, {
+      fileId,
+      markdown: nextMarkdown,
+      expectedRevision
+    });
+    setSaveState("saving");
+
+    if (autosaveTimeoutRef.current !== null) {
+      window.clearTimeout(autosaveTimeoutRef.current);
+    }
+
+    autosaveTimeoutRef.current = window.setTimeout(() => {
+      autosaveTimeoutRef.current = null;
+      flushPendingSaveRef.current();
+    }, AUTOSAVE_DELAY_MS);
+  }, []);
+
+  const queueCurrentFileSave = useCallback(() => {
+    const currentFileId = activeFileIdRef.current;
+
+    if (!currentFileId) {
+      return;
+    }
+
+    scheduleAutosave(currentFileId, markdownRef.current);
+  }, [scheduleAutosave]);
 
   const setEditorHandle = useCallback((handle: MarkdownEditorHandle | null) => {
     editorHandleRef.current = handle;
   }, []);
 
-  const handleMarkdownChange = useCallback((nextMarkdown: string) => {
-    storageWritePausedRef.current = false;
-    setMarkdown(nextMarkdown);
-  }, []);
+  const handleMarkdownChange = useCallback(
+    (nextMarkdown: string) => {
+      markdownRef.current = nextMarkdown;
+      setMarkdown(nextMarkdown);
 
-  const openModal = useCallback((nextModal: Exclude<ModalState, null>) => {
-    modalReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setModal(nextModal);
+      storageWritePausedRef.current = false;
+
+      const currentFileId = activeFileIdRef.current;
+
+      if (currentFileId) {
+        scheduleAutosave(currentFileId, nextMarkdown);
+      }
+    },
+    [scheduleAutosave]
+  );
+
+  const showSplitIndicatorBriefly = useCallback(() => {
+    setSplitIndicatorVisible(true);
+
+    if (splitIndicatorTimeoutRef.current !== null) {
+      window.clearTimeout(splitIndicatorTimeoutRef.current);
+    }
+
+    splitIndicatorTimeoutRef.current = window.setTimeout(() => {
+      setSplitIndicatorVisible(false);
+      splitIndicatorTimeoutRef.current = null;
+    }, SPLIT_INDICATOR_MS);
   }, []);
 
   useEffect(() => {
@@ -105,8 +351,47 @@ export function App() {
       if (actionFeedbackTimeoutRef.current !== null) {
         window.clearTimeout(actionFeedbackTimeoutRef.current);
       }
+
+      if (autosaveTimeoutRef.current !== null) {
+        window.clearTimeout(autosaveTimeoutRef.current);
+      }
+
+      if (splitIndicatorTimeoutRef.current !== null) {
+        window.clearTimeout(splitIndicatorTimeoutRef.current);
+      }
     };
   }, []);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 920px)");
+    const syncViewportMode = () => {
+      setIsMobileViewport(mediaQuery.matches);
+    };
+
+    syncViewportMode();
+    mediaQuery.addEventListener("change", syncViewportMode);
+
+    return () => {
+      mediaQuery.removeEventListener("change", syncViewportMode);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleWindowError = (event: ErrorEvent) => {
+      appendTechnicalError("window error", event.message || "Window error", event.filename || "window");
+    };
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      appendTechnicalError("unhandledrejection", getErrorMessage(event.reason, "Unhandled promise rejection"), "promise");
+    };
+
+    window.addEventListener("error", handleWindowError);
+    window.addEventListener("unhandledrejection", handleUnhandledRejection);
+
+    return () => {
+      window.removeEventListener("error", handleWindowError);
+      window.removeEventListener("unhandledrejection", handleUnhandledRejection);
+    };
+  }, [appendTechnicalError]);
 
   useEffect(() => {
     markdownRef.current = markdown;
@@ -146,20 +431,27 @@ export function App() {
     broadcastRef.current = channel;
 
     channel.onmessage = (event: MessageEvent<unknown>) => {
-      const record = parseDraftBroadcast(event.data);
+      const record = parseFileBroadcast(event.data);
 
-      if (!record || record.clientId === clientIdRef.current || record.revision <= currentDraftRevisionRef.current) {
+      if (!record || record.clientId === clientIdRef.current) {
+        return;
+      }
+
+      upsertFile(record);
+
+      if (record.id !== activeFileIdRef.current || record.revision <= currentFileRevisionRef.current) {
         return;
       }
 
       if (record.markdown === markdownRef.current) {
-        currentDraftRevisionRef.current = record.revision;
+        currentFileRevisionRef.current = record.revision;
+        fileRevisionsRef.current.set(record.id, record.revision);
         setPendingConflictAction(null);
         setSaveState("saved");
         return;
       }
 
-      remoteDraftRef.current = record;
+      remoteFileRef.current = record;
       setPendingConflictAction(null);
       setSaveState("conflict");
       completeAction("conflict", "Draft changed in another tab");
@@ -169,15 +461,54 @@ export function App() {
       channel.close();
       broadcastRef.current = null;
     };
+  }, [completeAction, upsertFile]);
+
+  const closeHelp = useCallback(() => {
+    setIsHelpOpen(false);
+    completeAction("help", "Help closed");
   }, [completeAction]);
+
+  const openHelp = useCallback(() => {
+    setIsHelpOpen(true);
+    completeAction("help", "Help opened");
+  }, [completeAction]);
+
+  useEffect(() => {
+    if (!isHelpOpen) {
+      return undefined;
+    }
+
+    const dialog = helpDialogRef.current;
+
+    if (!dialog) {
+      return undefined;
+    }
+
+    if (!dialog.open) {
+      dialog.showModal();
+    }
+
+    helpCloseButtonRef.current?.focus();
+
+    const handleCancel = (event: Event) => {
+      event.preventDefault();
+      closeHelp();
+    };
+
+    dialog.addEventListener("cancel", handleCancel);
+
+    return () => {
+      dialog.removeEventListener("cancel", handleCancel);
+    };
+  }, [closeHelp, isHelpOpen]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadStoredState() {
       try {
-        const [storedDraftRecord, storedPreferences] = await Promise.all([
-          storageRef.current.loadDraftRecord(),
+        const [storedWorkspace, storedPreferences] = await Promise.all([
+          storageRef.current.loadWorkspace(DEFAULT_MARKDOWN),
           storageRef.current.loadPreferences()
         ]);
 
@@ -185,22 +516,28 @@ export function App() {
           return;
         }
 
-        if (storedDraftRecord !== null) {
-          currentDraftRevisionRef.current = storedDraftRecord.revision;
-          setMarkdown(storedDraftRecord.markdown);
-        }
+        fileRevisionsRef.current = new Map(storedWorkspace.files.map((file) => [file.id, file.revision]));
+        activeFileIdRef.current = storedWorkspace.activeFileId;
+        currentFileRevisionRef.current = storedWorkspace.activeFile.revision;
+        markdownRef.current = storedWorkspace.activeFile.markdown;
 
+        setFiles(storedWorkspace.files);
+        setActiveFileId(storedWorkspace.activeFileId);
+        setMarkdown(storedWorkspace.activeFile.markdown);
         setTheme(storedPreferences.theme);
         setOutlineVisible(storedPreferences.outlineVisible);
         setSplitRatio(storedPreferences.splitRatio);
         setSaveState("saved");
-      } catch {
+      } catch (error) {
         if (!cancelled) {
+          captureStorageError(error, "load workspace");
           storageWritePausedRef.current = true;
           setSaveState("unavailable");
         }
       } finally {
-        loadedRef.current = true;
+        if (!cancelled) {
+          loadedRef.current = true;
+        }
       }
     }
 
@@ -209,7 +546,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [captureStorageError]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -219,65 +556,12 @@ export function App() {
     }
 
     const preferences: Preferences = { theme, outlineVisible, splitRatio };
-    void storageRef.current.savePreferences(preferences).catch(() => {
+    void storageRef.current.savePreferences(preferences).catch((error: unknown) => {
+      captureStorageError(error, "save preferences");
       storageWritePausedRef.current = true;
       setSaveState("unavailable");
     });
-  }, [outlineVisible, splitRatio, theme]);
-
-  useEffect(() => {
-    if (
-      !loadedRef.current ||
-      storageWritePausedRef.current ||
-      saveStateRef.current === "conflict"
-    ) {
-      return;
-    }
-
-    if (skipNextAutosaveRef.current) {
-      skipNextAutosaveRef.current = false;
-      return;
-    }
-
-    setSaveState("saving");
-
-    const timeout = window.setTimeout(() => {
-      void storageRef.current
-        .saveDraftRecord(markdown, {
-          clientId: clientIdRef.current,
-          expectedRevision: currentDraftRevisionRef.current
-        })
-        .then((record) => {
-          currentDraftRevisionRef.current = record.revision;
-          broadcastDraft(record, broadcastRef.current);
-          setSaveState("saved");
-        })
-        .catch((error: unknown) => {
-          if (error instanceof DraftConflictError) {
-            if (error.storedRecord?.markdown === markdownRef.current) {
-              currentDraftRevisionRef.current = error.storedRecord.revision;
-              remoteDraftRef.current = null;
-              setPendingConflictAction(null);
-              setSaveState("saved");
-              return;
-            }
-
-            remoteDraftRef.current = error.storedRecord;
-            setPendingConflictAction(null);
-            setSaveState("conflict");
-            completeAction("conflict", "Draft changed in another tab");
-            return;
-          }
-
-          storageWritePausedRef.current = true;
-          setSaveState("unavailable");
-        });
-    }, 300);
-
-    return () => {
-      window.clearTimeout(timeout);
-    };
-  }, [completeAction, markdown]);
+  }, [captureStorageError, outlineVisible, splitRatio, theme]);
 
   const copyMarkdown = useCallback(async () => {
     await runClipboardAction(
@@ -332,18 +616,6 @@ export function App() {
     completeAction("theme", nextTheme === "dark" ? "Dark theme" : "Light theme");
   }, [completeAction, theme]);
 
-  const toggleOutline = useCallback(() => {
-    const nextVisible = !outlineVisible;
-
-    setOutlineVisible(nextVisible);
-    completeAction("outline", nextVisible ? "Outline shown" : "Outline hidden");
-  }, [completeAction, outlineVisible]);
-
-  const openAbout = useCallback(() => {
-    openModal("about");
-    completeAction("about", "About opened");
-  }, [completeAction, openModal]);
-
   const exportPdf = useCallback(() => {
     if (!isPreviewFresh("pdf")) {
       return;
@@ -357,29 +629,175 @@ export function App() {
     }
   }, [completeAction, isPreviewFresh]);
 
-  const applyStoredDraft = useCallback((record: DraftRecord) => {
-    currentDraftRevisionRef.current = record.revision;
-    remoteDraftRef.current = null;
-    storageWritePausedRef.current = false;
-    skipNextAutosaveRef.current = true;
-    setPendingConflictAction(null);
-    setMarkdown(record.markdown);
-    setSaveState("saved");
+  const switchActiveFile = useCallback(
+    async (fileId: string) => {
+      if (!fileId || fileId === activeFileIdRef.current) {
+        return;
+      }
+
+      queueCurrentFileSave();
+      setSaveState("loading");
+
+      try {
+        const record = await storageRef.current.setActiveFile(fileId);
+
+        applyActiveFile(record);
+        completeAction("file", "File opened");
+      } catch (error) {
+        captureStorageError(error, "switch file");
+        storageWritePausedRef.current = true;
+        setSaveState("unavailable");
+      }
+    },
+    [applyActiveFile, captureStorageError, completeAction, queueCurrentFileSave]
+  );
+
+  const createNewFile = useCallback(async () => {
+    queueCurrentFileSave();
+    setSaveState("loading");
+
+    try {
+      const record = await storageRef.current.createFile(DEFAULT_MARKDOWN, `New file ${files.length + 1}`);
+
+      applyActiveFile(record);
+      completeAction("file", "New file created");
+    } catch (error) {
+      captureStorageError(error, "create file");
+      storageWritePausedRef.current = true;
+      setSaveState("unavailable");
+    }
+  }, [applyActiveFile, captureStorageError, completeAction, files.length, queueCurrentFileSave]);
+
+  const deleteFile = useCallback(
+    async (fileId: string) => {
+      const deletingActiveFile = fileId === activeFileIdRef.current;
+      const previousSaveState = saveStateRef.current;
+
+      if (renamingFileId === fileId) {
+        setRenamingFileId(null);
+        setRenameDraft("");
+      }
+
+      if (!deletingActiveFile) {
+        queueCurrentFileSave();
+      }
+
+      pendingSavesRef.current.delete(fileId);
+
+      if (inFlightSaveRef.current?.fileId === fileId) {
+        inFlightSaveRef.current = null;
+      }
+
+      if (deletingActiveFile) {
+        setSaveState("loading");
+      }
+
+      try {
+        const workspace = await storageRef.current.deleteFile(fileId, DEFAULT_MARKDOWN);
+
+        fileRevisionsRef.current = new Map(workspace.files.map((file) => [file.id, file.revision]));
+        setFiles(workspace.files);
+
+        if (deletingActiveFile || workspace.activeFileId !== activeFileIdRef.current) {
+          applyActiveFile(workspace.activeFile);
+        } else {
+          setActiveFileId(workspace.activeFileId);
+          setSaveState(previousSaveState === "loading" ? "saved" : previousSaveState);
+        }
+
+        completeAction("file", "File removed");
+      } catch (error) {
+        captureStorageError(error, "delete file");
+        storageWritePausedRef.current = true;
+        setSaveState("unavailable");
+      }
+    },
+    [applyActiveFile, captureStorageError, completeAction, queueCurrentFileSave, renamingFileId]
+  );
+
+  const beginRenameFile = useCallback((file: FileRecord) => {
+    setRenamingFileId(file.id);
+    setRenameDraft(file.title);
   }, []);
 
-  const reloadConflictDraft = useCallback(async () => {
-    try {
-      const record = remoteDraftRef.current ?? (await storageRef.current.loadDraftRecord());
+  const cancelRenameFile = useCallback(() => {
+    setRenamingFileId(null);
+    setRenameDraft("");
+  }, []);
 
-      if (!record) {
-        remoteDraftRef.current = null;
+  const commitRenameFile = useCallback(
+    async (fileId: string) => {
+      try {
+        const record = await storageRef.current.renameFile(fileId, renameDraft);
+
+        upsertFile(record);
+        setRenamingFileId(null);
+        setRenameDraft("");
+        completeAction("rename", "File renamed");
+      } catch (error) {
+        captureStorageError(error, "rename file");
+        storageWritePausedRef.current = true;
+        setSaveState("unavailable");
+      }
+    },
+    [captureStorageError, completeAction, renameDraft, upsertFile]
+  );
+
+  const handleRenameKeyDown = useCallback(
+    (event: JSX.TargetedKeyboardEvent<HTMLInputElement>, fileId: string) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void commitRenameFile(fileId);
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancelRenameFile();
+      }
+    },
+    [cancelRenameFile, commitRenameFile]
+  );
+
+  const toggleSidebar = useCallback(() => {
+    setOutlineVisible((current) => {
+      const nextVisible = !current;
+
+      completeAction("sidebar", nextVisible ? "Sidebar shown" : "Sidebar hidden");
+      return nextVisible;
+    });
+  }, [completeAction]);
+
+  const chooseViewMode = useCallback(
+    (nextViewMode: ViewMode) => {
+      setViewMode(nextViewMode);
+      completeAction("view", `${viewModeLabel(nextViewMode)} view`);
+    },
+    [completeAction]
+  );
+
+  const reloadConflictDraft = useCallback(async () => {
+    const currentFileId = activeFileIdRef.current;
+
+    if (!currentFileId) {
+      setPendingConflictAction(null);
+      setSaveState("saved");
+      completeAction("reload", "No remote draft");
+      return;
+    }
+
+    try {
+      const record = remoteFileRef.current ?? (await storageRef.current.loadFileRecord(currentFileId));
+
+      if (!record || record.id !== currentFileId) {
+        remoteFileRef.current = null;
         setPendingConflictAction(null);
         setSaveState("saved");
         completeAction("reload", "No remote draft");
         return;
       }
 
-      remoteDraftRef.current = record;
+      remoteFileRef.current = record;
 
       if (markdownRef.current !== record.markdown) {
         setPendingConflictAction("reload");
@@ -387,16 +805,17 @@ export function App() {
         return;
       }
 
-      applyStoredDraft(record);
+      applyActiveFile(record);
       completeAction("reload", "Draft reloaded");
-    } catch {
+    } catch (error) {
+      captureStorageError(error, "reload conflict");
       storageWritePausedRef.current = true;
       setSaveState("unavailable");
     }
-  }, [applyStoredDraft, completeAction]);
+  }, [applyActiveFile, captureStorageError, completeAction]);
 
   const confirmConflictReload = useCallback(() => {
-    const record = remoteDraftRef.current;
+    const record = remoteFileRef.current;
 
     if (!record) {
       setPendingConflictAction(null);
@@ -404,9 +823,9 @@ export function App() {
       return;
     }
 
-    applyStoredDraft(record);
+    applyActiveFile(record);
     completeAction("reload", "Draft reloaded");
-  }, [applyStoredDraft, completeAction]);
+  }, [applyActiveFile, completeAction]);
 
   const cancelConflictReload = useCallback(() => {
     setPendingConflictAction(null);
@@ -414,27 +833,38 @@ export function App() {
   }, [completeAction]);
 
   const overwriteConflictDraft = useCallback(async () => {
+    const currentFileId = activeFileIdRef.current;
+
+    if (!currentFileId) {
+      setSaveState("unavailable");
+      return;
+    }
+
+    pendingSavesRef.current.delete(currentFileId);
     setSaveState("saving");
     storageWritePausedRef.current = false;
 
     try {
-      const record = await storageRef.current.saveDraftRecord(markdownRef.current, {
+      const record = await storageRef.current.saveFileRecord(currentFileId, markdownRef.current, {
         clientId: clientIdRef.current,
-        expectedRevision: currentDraftRevisionRef.current,
+        expectedRevision: currentFileRevisionRef.current,
         overwrite: true
       });
 
-      currentDraftRevisionRef.current = record.revision;
-      remoteDraftRef.current = null;
+      currentFileRevisionRef.current = record.revision;
+      fileRevisionsRef.current.set(record.id, record.revision);
+      remoteFileRef.current = null;
       setPendingConflictAction(null);
       setSaveState("saved");
-      broadcastDraft(record, broadcastRef.current);
+      upsertFile(record);
+      broadcastFile(record, broadcastRef.current);
       completeAction("overwrite", "Draft overwritten");
-    } catch {
+    } catch (error) {
+      captureStorageError(error, "overwrite conflict");
       storageWritePausedRef.current = true;
       setSaveState("unavailable");
     }
-  }, [completeAction]);
+  }, [captureStorageError, completeAction, upsertFile]);
 
   const updateSplitRatioFromClientX = useCallback((clientX: number) => {
     const workspace = workspaceRef.current;
@@ -457,6 +887,7 @@ export function App() {
 
       event.preventDefault();
       setIsResizing(true);
+      setSplitIndicatorVisible(true);
       updateSplitRatioFromClientX(event.clientX);
 
       const onPointerMove = (moveEvent: PointerEvent) => {
@@ -464,6 +895,7 @@ export function App() {
       };
       const endPointerDrag = () => {
         setIsResizing(false);
+        setSplitIndicatorVisible(false);
         window.removeEventListener("pointermove", onPointerMove);
         window.removeEventListener("pointerup", endPointerDrag);
         window.removeEventListener("pointercancel", endPointerDrag);
@@ -476,18 +908,23 @@ export function App() {
     [updateSplitRatioFromClientX]
   );
 
-  const handleSplitterKeyDown = useCallback((event: JSX.TargetedKeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      setSplitRatio((current) => clampSplitRatio(current - 2));
-      return;
-    }
+  const handleSplitterKeyDown = useCallback(
+    (event: JSX.TargetedKeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        setSplitRatio((current) => clampSplitRatio(current - 2));
+        showSplitIndicatorBriefly();
+        return;
+      }
 
-    if (event.key === "ArrowRight") {
-      event.preventDefault();
-      setSplitRatio((current) => clampSplitRatio(current + 2));
-    }
-  }, []);
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        setSplitRatio((current) => clampSplitRatio(current + 2));
+        showSplitIndicatorBriefly();
+      }
+    },
+    [showSplitIndicatorBriefly]
+  );
 
   return (
     <div className="app-shell">
@@ -497,62 +934,174 @@ export function App() {
           <span>Live Markdown Preview</span>
         </div>
 
-        <div className="mobile-tabs" role="tablist" aria-label="Mobile view">
+        <div className="topbar-controls" aria-label="Editor controls">
           <button
             type="button"
-            className={mobileMode === "editor" ? "is-active" : ""}
-            onClick={() => setMobileMode("editor")}
-            aria-pressed={mobileMode === "editor"}
+            className={activeAction === "undo" ? "is-action-complete" : ""}
+            onClick={undoEdit}
+            title="Undo"
+            aria-label="Undo"
           >
-            <PanelLeft size={16} aria-hidden="true" />
-            Editor
+            <Undo2 size={16} aria-hidden="true" />
           </button>
           <button
             type="button"
-            className={mobileMode === "preview" ? "is-active" : ""}
-            onClick={() => setMobileMode("preview")}
-            aria-pressed={mobileMode === "preview"}
+            className={activeAction === "redo" ? "is-action-complete" : ""}
+            onClick={redoEdit}
+            title="Redo"
+            aria-label="Redo"
           >
-            <FileText size={16} aria-hidden="true" />
-            Preview
+            <Redo2 size={16} aria-hidden="true" />
           </button>
+          <span className="topbar-divider" aria-hidden="true" />
+          <button
+            type="button"
+            className={`${outlineVisible ? "is-active" : ""}${activeAction === "sidebar" ? " is-action-complete" : ""}`}
+            onClick={toggleSidebar}
+            title={outlineVisible ? "Hide sidebar" : "Show sidebar"}
+            aria-label={outlineVisible ? "Hide sidebar" : "Show sidebar"}
+            aria-pressed={outlineVisible}
+          >
+            {outlineVisible ? <PanelLeftClose size={16} aria-hidden="true" /> : <PanelLeft size={16} aria-hidden="true" />}
+          </button>
+
+          <div className="view-switcher" role="group" aria-label="View mode" data-view-mode={effectiveViewMode}>
+            <button
+              type="button"
+              className={`view-mode-markdown${effectiveViewMode === "markdown" ? " is-active" : ""}`}
+              onClick={() => chooseViewMode("markdown")}
+              aria-label="Markdown"
+              aria-pressed={effectiveViewMode === "markdown"}
+            >
+              <PanelLeft size={16} aria-hidden="true" />
+              <span>Markdown</span>
+            </button>
+            <button
+              type="button"
+              className={`view-mode-split${effectiveViewMode === "split" ? " is-active" : ""}`}
+              onClick={() => chooseViewMode("split")}
+              aria-label="Split"
+              aria-pressed={effectiveViewMode === "split"}
+            >
+              <Columns2 size={16} aria-hidden="true" />
+              <span>Split</span>
+            </button>
+            <button
+              type="button"
+              className={`view-mode-preview${effectiveViewMode === "preview" ? " is-active" : ""}`}
+              onClick={() => chooseViewMode("preview")}
+              aria-label="Preview"
+              aria-pressed={effectiveViewMode === "preview"}
+            >
+              <Eye size={16} aria-hidden="true" />
+              <span>Preview</span>
+            </button>
+          </div>
         </div>
 
         <Toolbar
           activeAction={activeAction}
           githubUrl={GITHUB_URL}
-          outlineVisible={outlineVisible}
           theme={theme}
           onCopyHtml={copyHtml}
           onCopyMarkdown={copyMarkdown}
           onExportPdf={exportPdf}
-          onOpenAbout={openAbout}
-          onRedo={redoEdit}
-          onToggleOutline={toggleOutline}
+          onOpenHelp={openHelp}
           onToggleTheme={toggleTheme}
-          onUndo={undoEdit}
         />
       </header>
 
       <main
         ref={workspaceRef}
-        className={`workspace mode-${mobileMode} split-${splitRatio}${isResizing ? " is-resizing" : ""}`}
+        className={`workspace mode-${effectiveViewMode} split-${splitRatio}${isResizing ? " is-resizing" : ""}`}
       >
         <section className={`pane editor-pane${outlineVisible ? "" : " outline-hidden"}`} aria-label="Markdown editor">
           {outlineVisible && (
-            <aside className="outline" aria-label="Document outline">
-              <div className="outline-title">Outline</div>
-              {headings.length > 0 ? (
-                <ol>
-                  {headings.map((heading) => (
-                    <li key={`${heading.id}-${heading.line}`} className={`outline-level-${heading.level}`}>
-                      <a href={`#${heading.id}`}>{heading.text || "Untitled"}</a>
-                    </li>
-                  ))}
+            <aside className="workspace-sidebar" aria-label="File manager and document outline">
+              <section className="sidebar-section file-manager-panel" aria-label="Files">
+                <div className="sidebar-title-row">
+                  <div className="outline-title">Files</div>
+                  <button type="button" className="sidebar-icon-button" onClick={createNewFile} title="New file" aria-label="New file">
+                    <Plus size={15} aria-hidden="true" />
+                  </button>
+                </div>
+
+                <ol className="file-list">
+                  {files.length === 0 ? (
+                    <li className="file-list-empty">Loading file</li>
+                  ) : (
+                    files.map((file) => (
+                      <li
+                        key={file.id}
+                        className={`${file.id === activeFileId ? "is-active" : ""}${renamingFileId === file.id ? " is-renaming" : ""}`}
+                      >
+                        {renamingFileId === file.id ? (
+                          <form
+                            className="file-rename-form"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              void commitRenameFile(file.id);
+                            }}
+                          >
+                            <input
+                              type="text"
+                              value={renameDraft}
+                              autoFocus
+                              aria-label={`Rename ${file.title}`}
+                              onInput={(event) => setRenameDraft(event.currentTarget.value)}
+                              onKeyDown={(event) => handleRenameKeyDown(event, file.id)}
+                            />
+                            <button type="submit" title="Save file name" aria-label="Save file name">
+                              <Check size={14} aria-hidden="true" />
+                            </button>
+                            <button type="button" onClick={cancelRenameFile} title="Cancel rename" aria-label="Cancel rename">
+                              <X size={14} aria-hidden="true" />
+                            </button>
+                          </form>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              className="file-list-button"
+                              onClick={() => void switchActiveFile(file.id)}
+                              onDblClick={() => beginRenameFile(file)}
+                              aria-pressed={file.id === activeFileId}
+                              title={file.title}
+                            >
+                              <FileText size={15} aria-hidden="true" />
+                              <span>{file.title}</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="file-delete-button"
+                              onClick={() => void deleteFile(file.id)}
+                              title={`Delete ${file.title}`}
+                              aria-label={`Delete ${file.title}`}
+                            >
+                              <Trash2 size={14} aria-hidden="true" />
+                            </button>
+                          </>
+                        )}
+                      </li>
+                    ))
+                  )}
                 </ol>
-              ) : (
-                <p>No headings</p>
-              )}
+              </section>
+
+              <section className="sidebar-section outline" aria-label="Document outline">
+                <div className="outline-title">Outline</div>
+                {headings.length > 0 ? (
+                  <ol>
+                    {headings.map((heading) => (
+                      <li key={`${heading.id}-${heading.line}`} className={`outline-level-${heading.level}`}>
+                        <a href={`#${heading.id}`}>{heading.text || "Untitled"}</a>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p>No headings</p>
+                )}
+              </section>
             </aside>
           )}
 
@@ -578,7 +1127,13 @@ export function App() {
           tabIndex={0}
           onPointerDown={beginSplitDrag}
           onKeyDown={handleSplitterKeyDown}
-        />
+        >
+          {(isResizing || splitIndicatorVisible) && (
+            <span className="split-ratio-indicator" role="status" aria-live="polite">
+              {splitRatio}% / {100 - splitRatio}%
+            </span>
+          )}
+        </div>
 
         <section className="pane preview-pane" aria-label="Markdown preview">
           <div className="preview-scroll">
@@ -586,6 +1141,8 @@ export function App() {
           </div>
         </section>
       </main>
+
+      {isHelpOpen && <HelpDialog closeButtonRef={helpCloseButtonRef} dialogRef={helpDialogRef} onClose={closeHelp} />}
 
       <StatusBar
         actionStatus={actionStatus}
@@ -601,22 +1158,83 @@ export function App() {
         onReloadConflictDraft={reloadConflictDraft}
         onOverwriteConflictDraft={overwriteConflictDraft}
       />
-
-      {modal === "about" && (
-        <Modal title="About" onClose={closeModal}>
-          <p>
-            Live Markdown Preview is a local-first Markdown editor with safe live preview,
-            and print-based PDF export.
-          </p>
-          <p>Author: Igor Markin</p>
-          <p>
-            <a href={GITHUB_URL} target="_blank" rel="noreferrer">
-              GitHub repository
-            </a>
-          </p>
-        </Modal>
-      )}
     </div>
+  );
+}
+
+interface HelpDialogProps {
+  closeButtonRef: { current: HTMLButtonElement | null };
+  dialogRef: { current: HTMLDialogElement | null };
+  onClose: () => void;
+}
+
+function HelpDialog({ closeButtonRef, dialogRef, onClose }: HelpDialogProps) {
+  return (
+    <dialog
+      ref={dialogRef}
+      className="help-dialog"
+      aria-labelledby="help-title"
+      onClick={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        const clickedBackdrop =
+          event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom;
+
+        if (clickedBackdrop) {
+          onClose();
+        }
+      }}
+    >
+      <header className="help-dialog-header">
+        <h2 id="help-title">Help</h2>
+        <button ref={closeButtonRef} type="button" onClick={onClose} title="Close help" aria-label="Close help">
+          <X size={16} aria-hidden="true" />
+        </button>
+      </header>
+
+      <div className="help-dialog-body">
+        <section className="help-section" aria-labelledby="help-guide-title">
+          <h3 id="help-guide-title">Guide</h3>
+          <ol>
+            <li>Write Markdown in the editor and read the rendered preview beside it.</li>
+            <li>Use the file sidebar to create drafts, switch files, rename them, or remove old ones.</li>
+            <li>Copy Markdown or sanitized HTML when the preview is fresh, then export PDF from the preview.</li>
+          </ol>
+        </section>
+
+        <section className="help-section" aria-labelledby="help-shortcuts-title">
+          <h3 id="help-shortcuts-title">Shortcuts</h3>
+          <dl className="shortcut-list">
+            <div>
+              <dt>Undo</dt>
+              <dd>
+                <kbd>Cmd</kbd>/<kbd>Ctrl</kbd> + <kbd>Z</kbd>
+              </dd>
+            </div>
+            <div>
+              <dt>Redo</dt>
+              <dd>
+                <kbd>Cmd</kbd>/<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd>
+              </dd>
+            </div>
+            <div>
+              <dt>Save file name</dt>
+              <dd>
+                <kbd>Enter</kbd>
+              </dd>
+            </div>
+          </dl>
+        </section>
+
+        <section className="help-section" aria-labelledby="help-features-title">
+          <h3 id="help-features-title">Features</h3>
+          <ul>
+            <li>Local autosave with draft conflict detection across tabs.</li>
+            <li>Split, Markdown-only, and Preview-only modes with a resizable desktop split.</li>
+            <li>Large document protection, safe link handling, and sanitized HTML export.</li>
+          </ul>
+        </section>
+      </div>
+    </dialog>
   );
 }
 
@@ -644,24 +1262,72 @@ function createClientId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-function broadcastDraft(record: DraftRecord, channel: BroadcastChannel | null): void {
+function takePendingSave(pendingSaves: Map<string, PendingSave>, activeFileId: string | null): PendingSave | null {
+  const activeSave = activeFileId ? pendingSaves.get(activeFileId) : undefined;
+
+  if (activeSave) {
+    pendingSaves.delete(activeSave.fileId);
+    return activeSave;
+  }
+
+  const nextSave = pendingSaves.values().next().value as PendingSave | undefined;
+
+  if (!nextSave) {
+    return null;
+  }
+
+  pendingSaves.delete(nextSave.fileId);
+  return nextSave;
+}
+
+function broadcastFile(record: FileRecord, channel: BroadcastChannel | null): void {
   try {
-    channel?.postMessage({ type: "draft-saved", record });
+    channel?.postMessage({ type: "file-saved", fileId: record.id, record });
   } catch {
     // BroadcastChannel is a best-effort early conflict signal; IndexedDB CAS is the source of truth.
   }
 }
 
-function parseDraftBroadcast(value: unknown): DraftRecord | null {
+function parseFileBroadcast(value: unknown): FileRecord | null {
   if (!value || typeof value !== "object") {
     return null;
   }
 
-  const message = value as { type?: unknown; record?: unknown };
+  const message = value as { type?: unknown; fileId?: unknown; record?: unknown };
 
-  if (message.type !== "draft-saved") {
+  if (message.type !== "file-saved") {
     return null;
   }
 
-  return normalizeDraftRecord(message.record);
+  const record = normalizeFileRecord(message.record);
+
+  if (!record || message.fileId !== record.id) {
+    return null;
+  }
+
+  return record;
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim().length > 0) {
+    return error;
+  }
+
+  return fallback;
+}
+
+function viewModeLabel(viewMode: ViewMode): string {
+  if (viewMode === "markdown") {
+    return "Markdown";
+  }
+
+  if (viewMode === "preview") {
+    return "Preview";
+  }
+
+  return "Split";
 }

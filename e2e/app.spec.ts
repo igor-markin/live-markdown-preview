@@ -28,7 +28,7 @@ test("copy buttons write markdown and sanitized HTML", async ({ page, context })
   );
   await expect(page.locator(".markdown-preview h1")).toHaveText("Copy");
 
-  await page.getByRole("button", { name: "Copy Markdown" }).click();
+  await page.getByRole("button", { name: "Copy Markdown source" }).click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain("<script>");
   await expect(page.locator(".statusbar")).toContainText("Markdown copied");
 
@@ -43,51 +43,106 @@ test("copy buttons write markdown and sanitized HTML", async ({ page, context })
   await expect(page.locator(".statusbar")).toContainText("HTML copied");
 });
 
-test("desktop layout keeps chrome visible, hides outline, and persists split ratio", async ({ page }) => {
+test("desktop layout keeps chrome visible, keeps sidebar, and persists split ratio", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 760 });
   await page.goto("/");
 
   await expect(page.locator(".markdown-preview h1")).toBeVisible();
   await expect(page.locator(".topbar")).toBeVisible();
   await expect(page.locator(".statusbar")).toBeVisible();
+  await expect(page.locator(".cm-editor")).toHaveAttribute("data-gramm", "false");
+  await expect(page.locator(".cm-content")).toHaveAttribute("data-enable-grammarly", "false");
   await expect(page.locator(".statusbar")).not.toHaveAttribute("aria-live", "polite");
   await expect(page.locator(".statusbar")).toContainText(/Rendered in \d+ ms/);
+  await expect(page.locator(".statusbar svg")).toHaveCount(3);
   await expect(page.getByRole("button", { name: "Templates" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Safe Beautify Markdown" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "About" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Markdown", exact: true })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Copy Markdown", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Copy Markdown source", exact: true })).toHaveCount(1);
 
   const toolbarOrder = await page.locator(".toolbar").evaluate((toolbar) =>
     Array.from(toolbar.children).map((element) => element.getAttribute("aria-label") ?? "separator")
   );
 
   expect(toolbarOrder).toEqual([
-    "Undo",
-    "Redo",
-    "separator",
-    "Hide Outline",
-    "separator",
-    "Copy Markdown",
+    "Copy Markdown source",
     "Copy sanitized HTML",
     "separator",
     "Export PDF",
-    "separator",
-    "About",
+    "Help",
     "Open GitHub repository",
     "separator",
     "Toggle Theme"
   ]);
-  expect(await page.locator(".toolbar-separator").count()).toBe(5);
+  expect(await page.locator(".toolbar .toolbar-separator").count()).toBe(2);
 
+  const topbarControlOrder = await page.locator(".topbar-controls").evaluate((controls) => {
+    const names: string[] = [];
+
+    for (const element of Array.from(controls.children)) {
+      if (element.classList.contains("topbar-divider")) {
+        names.push("divider");
+        continue;
+      }
+
+      if (element.classList.contains("view-switcher")) {
+        for (const child of Array.from(element.children)) {
+          names.push(child.getAttribute("aria-label") ?? child.textContent?.trim() ?? "");
+        }
+        continue;
+      }
+
+      names.push(element.getAttribute("aria-label") ?? "");
+    }
+
+    return names;
+  });
+
+  expect(topbarControlOrder).toEqual(["Undo", "Redo", "divider", "Hide sidebar", "Markdown", "Split", "Preview"]);
+  expect(await page.locator(".topbar-divider").count()).toBe(1);
+
+  const toolbarOverflow = await page.locator(".toolbar").evaluate((toolbar) => ({
+    clientWidth: toolbar.clientWidth,
+    overflowX: getComputedStyle(toolbar).overflowX,
+    scrollWidth: toolbar.scrollWidth
+  }));
+
+  expect(toolbarOverflow.overflowX).not.toBe("auto");
+  expect(toolbarOverflow.overflowX).not.toBe("scroll");
+  expect(toolbarOverflow.scrollWidth).toBeLessThanOrEqual(toolbarOverflow.clientWidth + 1);
+
+  const topbarControlsOverflow = await page.locator(".topbar-controls").evaluate((controls) => ({
+    clientWidth: controls.clientWidth,
+    overflowX: getComputedStyle(controls).overflowX,
+    scrollWidth: controls.scrollWidth
+  }));
+
+  expect(topbarControlsOverflow.overflowX).not.toBe("auto");
+  expect(topbarControlsOverflow.overflowX).not.toBe("scroll");
+  expect(topbarControlsOverflow.scrollWidth).toBeLessThanOrEqual(topbarControlsOverflow.clientWidth + 1);
+
+  await expect(page.locator(".workspace-sidebar")).toBeVisible();
   await expect(page.locator(".editor-pane .outline")).toBeVisible();
   await expect(page.locator(".preview-pane .outline")).toHaveCount(0);
 
-  const outlineBox = await page.locator(".editor-pane .outline").boundingBox();
+  const outlineBox = await page.locator(".workspace-sidebar").boundingBox();
   const editorShellBox = await page.locator(".editor-shell").boundingBox();
   expect(outlineBox?.x ?? 0).toBeLessThan(editorShellBox?.x ?? 0);
 
-  await page.getByRole("button", { name: "Hide Outline" }).click();
-  await expect(page.locator(".editor-pane .outline")).toHaveCount(0);
-  await expect(page.locator(".statusbar")).toContainText("Outline hidden");
-  await expect(page.locator(".action-status")).toContainText("Outline hidden");
+  await page.getByRole("button", { name: "Hide sidebar" }).click();
+  await expect(page.locator(".workspace-sidebar")).toHaveCount(0);
+  const hiddenEditorPaneBox = await page.locator(".editor-pane").boundingBox();
+  const hiddenEditorShellBox = await page.locator(".editor-shell").boundingBox();
+  expect(hiddenEditorPaneBox).not.toBeNull();
+  expect(hiddenEditorShellBox).not.toBeNull();
+  expect(Math.round(hiddenEditorShellBox!.x)).toBe(Math.round(hiddenEditorPaneBox!.x));
+  await waitForPreferences(page, { outlineVisible: false, splitRatio: 50 });
+
+  await page.getByRole("button", { name: "Show sidebar" }).click();
+  await expect(page.locator(".workspace-sidebar")).toBeVisible();
+  await waitForPreferences(page, { outlineVisible: true, splitRatio: 50 });
 
   const splitter = page.getByRole("separator", { name: "Resize Markdown and Preview panes" });
   await expect(splitter).toHaveCSS("cursor", "col-resize");
@@ -97,11 +152,13 @@ test("desktop layout keeps chrome visible, hides outline, and persists split rat
   await page.mouse.move(splitterBox!.x + splitterBox!.width / 2, splitterBox!.y + splitterBox!.height / 2);
   await page.mouse.down();
   await page.mouse.move(splitterBox!.x + splitterBox!.width / 2 + 140, splitterBox!.y + splitterBox!.height / 2);
+  await expect(page.locator(".split-ratio-indicator")).toContainText(/% \/ \d+%/);
   await page.mouse.up();
+  await expect(page.locator(".split-ratio-indicator")).toHaveCount(0);
 
   const splitAfterDrag = Number(await splitter.getAttribute("aria-valuenow"));
   expect(splitAfterDrag).toBeGreaterThan(50);
-  await waitForPreferences(page, { outlineVisible: false, splitRatio: splitAfterDrag });
+  await waitForPreferences(page, { outlineVisible: true, splitRatio: splitAfterDrag });
 
   await page.locator(".preview-scroll").evaluate((element) => {
     element.scrollTop = element.scrollHeight;
@@ -110,16 +167,19 @@ test("desktop layout keeps chrome visible, hides outline, and persists split rat
   await expect(page.locator(".statusbar")).toBeInViewport();
 
   await page.reload();
-  await expect(page.locator(".editor-pane .outline")).toHaveCount(0);
+  await expect(page.locator(".editor-pane .outline")).toBeVisible();
   await expect(splitter).toHaveAttribute("aria-valuenow", String(splitAfterDrag));
 
   await splitter.focus();
   await page.keyboard.press("ArrowLeft");
   await expect(splitter).toHaveAttribute("aria-valuenow", String(splitAfterDrag - 2));
-  await waitForPreferences(page, { outlineVisible: false, splitRatio: splitAfterDrag - 2 });
+  await expect(page.locator(".split-ratio-indicator")).toContainText(
+    `${splitAfterDrag - 2}% / ${100 - (splitAfterDrag - 2)}%`
+  );
+  await waitForPreferences(page, { outlineVisible: true, splitRatio: splitAfterDrag - 2 });
 });
 
-test("about and PDF export actions work", async ({ page }) => {
+test("PDF export, help, and GitHub action work without About", async ({ page }) => {
   await page.addInitScript(() => {
     window.print = () => {
       (window as Window & { __printCalled?: boolean }).__printCalled = true;
@@ -127,14 +187,24 @@ test("about and PDF export actions work", async ({ page }) => {
   });
 
   await page.goto("/");
+  await expect(page.locator(".statusbar")).toContainText(/Rendered in \d+ ms/);
 
-  await page.getByRole("button", { name: "About" }).click();
-  await expect(page.getByRole("dialog", { name: "About" })).toContainText("Igor Markin");
-  await expect(page.getByRole("link", { name: "GitHub repository", exact: true })).toHaveAttribute(
-    "href",
-    "https://github.com/igor-markin/live-markdown-preview"
-  );
-  await page.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByRole("button", { name: "About" })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "About" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Help" })).toHaveCount(1);
+
+  await page.getByRole("button", { name: "Help" }).click();
+  const helpDialog = page.getByRole("dialog", { name: "Help" });
+
+  await expect(helpDialog).toBeVisible();
+  await expect(helpDialog).toContainText("Guide");
+  await expect(helpDialog).toContainText("Shortcuts");
+  await expect(helpDialog).toContainText("Features");
+  await expect(page.getByRole("button", { name: "Close help" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Close help" })).toBeFocused();
+
+  await page.getByRole("button", { name: "Close help" }).click();
+  await expect(helpDialog).toHaveCount(0);
 
   await expect(page.getByRole("link", { name: "Open GitHub repository" })).toHaveAttribute(
     "href",
@@ -243,7 +313,7 @@ test("clipboard and print failures are reported", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator(".statusbar")).toContainText(/Rendered in \d+ ms/);
 
-  await page.getByRole("button", { name: "Copy Markdown" }).click();
+  await page.getByRole("button", { name: "Copy Markdown source" }).click();
   await expect(page.locator(".statusbar")).toContainText("Clipboard unavailable");
 
   await page.getByRole("button", { name: "Export PDF" }).click();
@@ -276,24 +346,6 @@ test("preview links keep app tab safe while internal anchors stay local", async 
   await expect(internalLink).not.toHaveAttribute("target", "_blank");
   await internalLink.click();
   expect(page.url()).toContain("#link");
-});
-
-test("modal traps focus, closes with Escape, and restores opener focus", async ({ page }) => {
-  await page.goto("/");
-
-  const aboutButton = page.getByRole("button", { name: "About" });
-  await aboutButton.click();
-
-  const dialog = page.getByRole("dialog", { name: "About" });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused();
-
-  await page.keyboard.press("Shift+Tab");
-  await expect(dialog.getByRole("link", { name: "GitHub repository" })).toBeFocused();
-
-  await page.keyboard.press("Escape");
-  await expect(dialog).toHaveCount(0);
-  await expect(aboutButton).toBeFocused();
 });
 
 test("two tabs detect draft conflicts and require explicit reload or overwrite", async ({ context }) => {
@@ -345,17 +397,161 @@ test("same-content revision conflicts are accepted without user conflict", async
   await pageB.close();
 });
 
-test("mobile mode switches between editor and preview", async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 720 });
+test("mobile view modes keep panes full width and chrome visible", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  await expect(page.getByRole("button", { name: "Markdown", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Split", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Preview", exact: true })).toBeVisible();
+  await expect(page.locator(".topbar")).toBeVisible();
+  await expect(page.locator(".statusbar")).toBeVisible();
+
+  const topbarControlsOverflow = await page.locator(".topbar-controls").evaluate((controls) => ({
+    clientWidth: controls.clientWidth,
+    scrollWidth: controls.scrollWidth
+  }));
+  const toolbarOverflow = await page.locator(".toolbar").evaluate((toolbar) => ({
+    clientWidth: toolbar.clientWidth,
+    scrollWidth: toolbar.scrollWidth
+  }));
+
+  expect(topbarControlsOverflow.scrollWidth).toBeLessThanOrEqual(topbarControlsOverflow.clientWidth + 1);
+  expect(toolbarOverflow.scrollWidth).toBeLessThanOrEqual(toolbarOverflow.clientWidth + 1);
+
+  const workspaceBox = await page.locator(".workspace").boundingBox();
+  const editorBox = await page.locator(".editor-pane").boundingBox();
+
+  expect(workspaceBox).not.toBeNull();
+  expect(editorBox).not.toBeNull();
+  expect(Math.round(editorBox!.width)).toBe(Math.round(workspaceBox!.width));
+  expect(workspaceBox!.height).toBeGreaterThan(500);
+
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+
+  await expect(page.locator(".preview-pane")).toBeVisible();
+  await expect(page.locator(".editor-pane")).toBeHidden();
+  await expect(page.locator(".topbar")).toBeVisible();
+  await expect(page.locator(".statusbar")).toBeVisible();
+
+  const previewBox = await page.locator(".preview-pane").boundingBox();
+
+  expect(previewBox).not.toBeNull();
+  expect(Math.round(previewBox!.width)).toBe(Math.round(workspaceBox!.width));
+});
+
+test("desktop and mobile view modes expose the expected panes", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.goto("/");
 
   await expect(page.locator(".editor-pane")).toBeVisible();
-  await expect(page.locator(".topbar")).toBeVisible();
-  await expect(page.locator(".statusbar")).toBeVisible();
-  await page.getByRole("button", { name: "Preview" }).click();
   await expect(page.locator(".preview-pane")).toBeVisible();
-  await expect(page.locator(".topbar")).toBeVisible();
-  await expect(page.locator(".statusbar")).toBeVisible();
+  await expect(page.getByRole("separator", { name: "Resize Markdown and Preview panes" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Markdown", exact: true }).click();
+  await expect(page.locator(".editor-pane")).toBeVisible();
+  await expect(page.locator(".preview-pane")).toBeHidden();
+
+  await page.getByRole("button", { name: "Split", exact: true }).click();
+  await expect(page.locator(".editor-pane")).toBeVisible();
+  await expect(page.locator(".preview-pane")).toBeVisible();
+
+  await page.getByRole("button", { name: "Preview", exact: true }).click();
+  await expect(page.locator(".editor-pane")).toBeHidden();
+  await expect(page.locator(".preview-pane")).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("button", { name: "Split", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Markdown", exact: true }).click();
+  await expect(page.locator(".editor-pane")).toBeVisible();
+  await expect(page.locator(".preview-pane")).toBeHidden();
+});
+
+test("selected text remains visible on the active editor line in both themes", async ({ page }) => {
+  await page.goto("/");
+  await replaceEditorText(page, "# Selection\n\nHighlight me");
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+
+  await expect(page.locator(".cm-selectionBackground").first()).toBeVisible();
+  const lightSelectionState = await selectionColors(page);
+  expect(lightSelectionState.selection).not.toBe("rgba(0, 0, 0, 0)");
+  expect(lightSelectionState.selection).not.toBe(lightSelectionState.activeLine);
+
+  await page.getByRole("button", { name: "Toggle Theme" }).click();
+  await replaceEditorText(page, "# Dark selection\n\nHighlight me too");
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+
+  await expect(page.locator(".cm-selectionBackground").first()).toBeVisible();
+  const darkSelectionState = await selectionColors(page);
+  expect(darkSelectionState.selection).not.toBe("rgba(0, 0, 0, 0)");
+  expect(darkSelectionState.selection).not.toBe(darkSelectionState.activeLine);
+});
+
+test("sidebar file manager creates, switches, removes, and preserves file contents", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto("/");
+  await expect(page.locator(".workspace-sidebar")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Untitled draft", exact: true })).toBeVisible();
+
+  await replaceEditorText(page, "# First file\n\nOriginal content");
+  await waitForDraft(page, "# First file\n\nOriginal content");
+
+  await page.getByRole("button", { name: "New file" }).click();
+  await expect(page.getByRole("button", { name: "New file 2", exact: true })).toBeVisible();
+  await replaceEditorText(page, "# Second file\n\nNew content");
+  await waitForDraft(page, "# Second file\n\nNew content");
+
+  await page.getByRole("button", { name: "New file 2", exact: true }).dblclick();
+  await expect(page.getByLabel("Rename New file 2")).toBeVisible();
+  await page.getByLabel("Rename New file 2").fill("Second renamed");
+  await page.getByRole("button", { name: "Save file name" }).click();
+  await expect(page.getByRole("button", { name: "Second renamed", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Second renamed", exact: true }).dblclick();
+  await expect(page.getByLabel("Rename Second renamed")).toBeVisible();
+  await page.getByLabel("Rename Second renamed").fill("Cancelled name");
+  await page.getByRole("button", { name: "Cancel rename" }).click();
+  await expect(page.getByRole("button", { name: "Second renamed", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancelled name", exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Untitled draft", exact: true }).click();
+  await expect(page.locator(".cm-content")).toContainText("Original content");
+  await expect(page.locator(".markdown-preview h1")).toHaveText("First file");
+
+  await page.getByRole("button", { name: "Second renamed", exact: true }).click();
+  await expect(page.locator(".cm-content")).toContainText("New content");
+  await expect(page.locator(".markdown-preview h1")).toHaveText("Second file");
+
+  await page.getByRole("button", { name: "Delete Second renamed" }).click();
+  await expect(page.getByRole("button", { name: "Second renamed", exact: true })).toHaveCount(0);
+  await expect(page.locator(".cm-content")).toContainText("Original content");
+  await expect(page.locator(".markdown-preview h1")).toHaveText("First file");
+});
+
+test("rapid typing saves the final markdown without a false conflict", async ({ page }) => {
+  await page.goto("/");
+  await replaceEditorText(page, "# Rapid\n\nf");
+  await replaceEditorText(page, "# Rapid\n\nfinal");
+  await replaceEditorText(page, "# Rapid\n\nfinal markdown");
+
+  await waitForDraft(page, "# Rapid\n\nfinal markdown");
+  await expect(page.locator(".statusbar")).not.toContainText("Draft changed in another tab");
+});
+
+test("reverting to loaded markdown before autosave does not save stale intermediate text", async ({ page }) => {
+  const original = "# Revert base\n\nStable";
+
+  await page.goto("/");
+  await replaceEditorText(page, original);
+  await waitForDraft(page, original);
+
+  await replaceEditorText(page, "# Revert base\n\nTemporary");
+  await replaceEditorText(page, original);
+  await page.waitForTimeout(900);
+
+  await waitForDraft(page, original);
+  await expect(page.locator(".statusbar")).toContainText("Saved");
+  await expect(page.locator(".statusbar")).not.toContainText("Saving");
 });
 
 async function waitForDraft(page: Page, expected: string): Promise<void> {
@@ -369,21 +565,27 @@ async function waitForDraft(page: Page, expected: string): Promise<void> {
           request.onsuccess = () => {
             const database = request.result;
             const transaction = database.transaction("app", "readonly");
-            const getRequest = transaction.objectStore("app").get("draft");
+            const store = transaction.objectStore("app");
+            const activeRequest = store.get("activeFileId");
 
-            getRequest.onsuccess = () => {
-              const value = getRequest.result as string | { markdown?: string } | undefined;
+            activeRequest.onsuccess = () => {
+              const activeFileId = typeof activeRequest.result === "string" ? activeRequest.result : "legacy-draft";
+              const fileRequest = store.get(`files/${activeFileId}`);
 
-              if (typeof value === "string") {
-                resolve(value);
-              } else {
+              fileRequest.onsuccess = () => {
+                const value = fileRequest.result as { markdown?: string } | undefined;
+
                 resolve(value?.markdown ?? null);
-              }
-              database.close();
+                database.close();
+              };
+              fileRequest.onerror = () => {
+                database.close();
+                reject(fileRequest.error);
+              };
             };
-            getRequest.onerror = () => {
+            activeRequest.onerror = () => {
               database.close();
-              reject(getRequest.error);
+              reject(activeRequest.error);
             };
           };
         });
@@ -396,6 +598,13 @@ async function replaceEditorText(page: Page, text: string): Promise<void> {
   await page.locator(".cm-content").click();
   await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
   await page.keyboard.insertText(text);
+}
+
+async function selectionColors(page: Page): Promise<{ activeLine: string; selection: string }> {
+  return page.evaluate(() => ({
+    activeLine: getComputedStyle(document.querySelector(".cm-activeLine") as Element).backgroundColor,
+    selection: getComputedStyle(document.querySelector(".cm-selectionBackground") as Element).backgroundColor
+  }));
 }
 
 async function seedDraft(page: Page, markdown: string): Promise<void> {
@@ -412,17 +621,31 @@ async function seedDraft(page: Page, markdown: string): Promise<void> {
       request.onsuccess = () => {
         const database = request.result;
         const transaction = database.transaction("app", "readwrite");
+        const store = transaction.objectStore("app");
+        const activeRequest = store.get("activeFileId");
 
-        transaction.objectStore("app").put(
-          {
-            version: 2,
-            markdown: value,
-            revision: 1,
-            updatedAt: Date.now(),
-            clientId: "seed"
-          },
-          "draft"
-        );
+        activeRequest.onsuccess = () => {
+          const activeFileId = typeof activeRequest.result === "string" ? activeRequest.result : "legacy-draft";
+
+          store.put(
+            {
+              version: 1,
+              id: activeFileId,
+              title: "Seeded draft",
+              markdown: value,
+              revision: 1,
+              updatedAt: Date.now(),
+              clientId: "seed"
+            },
+            `files/${activeFileId}`
+          );
+          store.put([activeFileId], "files/index");
+          store.put(activeFileId, "activeFileId");
+        };
+        activeRequest.onerror = () => {
+          database.close();
+          reject(activeRequest.error);
+        };
         transaction.oncomplete = () => {
           database.close();
           resolve();

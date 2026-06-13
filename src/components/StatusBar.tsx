@@ -1,4 +1,4 @@
-import { Check, TriangleAlert } from "lucide-preact";
+import { Check, FileText, Info, ListChecks, TriangleAlert } from "lucide-preact";
 import type { RenderState, SaveState } from "../types";
 
 type ConflictAction = null | "reload";
@@ -71,10 +71,19 @@ export function StatusBar({
         {renderState === "ready" && <Check size={14} aria-hidden="true" />}
         {renderStateLabel(renderState, renderDurationMs, renderMessage)}
       </span>
-      <span>{wordCount} words</span>
-      {diagnosticsCount > 0 && <span>{diagnosticsCount} diagnostics</span>}
+      <span className="status-pill">
+        <FileText size={14} aria-hidden="true" />
+        {wordCount} words
+      </span>
+      {diagnosticsCount > 0 && (
+        <span className="status-pill status-warning">
+          <ListChecks size={14} aria-hidden="true" />
+          {diagnosticsCount} diagnostics
+        </span>
+      )}
       {actionStatus && (
-        <span className="action-status" role="status" aria-live="polite" aria-atomic="true">
+        <span className="status-pill action-status" role="status" aria-live="polite" aria-atomic="true">
+          <Info size={14} aria-hidden="true" />
           {actionStatus}
         </span>
       )}

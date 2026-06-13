@@ -1,6 +1,6 @@
 export type Theme = "light" | "dark";
 
-export type MobileMode = "editor" | "preview";
+export type ViewMode = "markdown" | "split" | "preview";
 
 export type SaveState = "loading" | "saved" | "saving" | "unavailable" | "conflict";
 

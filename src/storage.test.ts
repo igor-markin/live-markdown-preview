@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_MARKDOWN } from "./defaults";
 import { createAppStorage, DraftConflictError, StorageUnavailableError } from "./storage";
 
 function deleteDatabase(name: string): Promise<void> {
@@ -16,82 +17,156 @@ describe("createAppStorage", () => {
     await deleteDatabase("live-markdown-preview");
   });
 
-  it("loads and saves the single draft and preferences", async () => {
+  it("migrates the legacy draft once without deleting the rollback key", async () => {
     const storage = createAppStorage(indexedDB);
-
-    await storage.saveDraft("# Draft");
-    await storage.savePreferences({ theme: "dark", outlineVisible: false, splitRatio: 64 });
-
-    expect(await storage.loadDraft()).toBe("# Draft");
-    expect(await storage.loadDraftRecord()).toMatchObject({
-      markdown: "# Draft",
-      revision: 1,
-      clientId: "legacy"
-    });
-    expect(await storage.loadPreferences()).toEqual({ theme: "dark", outlineVisible: false, splitRatio: 64 });
-  });
-
-  it("reads old string drafts as revision 0 and migrates them on first record save", async () => {
-    const storage = createAppStorage(indexedDB);
-
-    await seedValue("draft", "# Old Draft");
-
-    expect(await storage.loadDraftRecord()).toEqual({
+    const legacyDraft = {
       version: 2,
       markdown: "# Old Draft",
-      revision: 0,
-      updatedAt: 0
-    });
+      revision: 7,
+      updatedAt: 1234,
+      clientId: "legacy-client"
+    };
 
-    const saved = await storage.saveDraftRecord("# New Draft", {
-      clientId: "client-a",
-      expectedRevision: 0
-    });
+    await seedValue("draft", legacyDraft);
 
-    expect(saved).toMatchObject({
-      version: 2,
-      markdown: "# New Draft",
-      revision: 1,
-      clientId: "client-a"
+    const workspace = await storage.loadWorkspace(DEFAULT_MARKDOWN);
+
+    expect(workspace.activeFile).toMatchObject({
+      version: 1,
+      id: "legacy-draft",
+      title: "Old Draft",
+      markdown: "# Old Draft",
+      revision: 7,
+      clientId: "legacy-client"
     });
-    expect(saved.updatedAt).toBeGreaterThan(0);
+    expect(workspace.files).toHaveLength(1);
+    expect(await readValue("draft")).toEqual(legacyDraft);
+    expect(await readValue("files/index")).toEqual(["legacy-draft"]);
+    expect(await readValue("activeFileId")).toBe("legacy-draft");
   });
 
-  it("ignores corrupt draft records instead of failing app load", async () => {
+  it("does not remigrate after the file index exists", async () => {
     const storage = createAppStorage(indexedDB);
 
-    await seedValue("draft", { version: 2, markdown: 42, revision: "bad", updatedAt: 0 });
+    await seedValue("draft", "# Original");
+    const firstWorkspace = await storage.loadWorkspace(DEFAULT_MARKDOWN);
+    const saved = await storage.saveFileRecord(firstWorkspace.activeFileId, "# File workspace", {
+      clientId: "client-a",
+      expectedRevision: firstWorkspace.activeFile.revision
+    });
 
-    expect(await storage.loadDraft()).toBeNull();
-    expect(await storage.loadDraftRecord()).toBeNull();
+    await seedValue("draft", "# Changed legacy rollback draft");
+
+    const secondWorkspace = await storage.loadWorkspace(DEFAULT_MARKDOWN);
+
+    expect(secondWorkspace.activeFile).toMatchObject({
+      id: "legacy-draft",
+      markdown: "# File workspace",
+      revision: saved.revision
+    });
+    expect(secondWorkspace.files).toHaveLength(1);
+    expect(await readValue("draft")).toBe("# Changed legacy rollback draft");
   });
 
-  it("detects revision conflicts and supports explicit overwrite", async () => {
-    const storage = createAppStorage(indexedDB);
+  it("creates, switches, saves, and reloads multiple files", async () => {
+    let nextId = 1;
+    const storage = createAppStorage(indexedDB, {
+      createId: () => `file-${nextId++}`
+    });
+    const workspace = await storage.loadWorkspace(DEFAULT_MARKDOWN);
+    const secondFile = await storage.createFile(DEFAULT_MARKDOWN, "Second file");
 
-    const first = await storage.saveDraftRecord("# First", {
+    const savedSecond = await storage.saveFileRecord(secondFile.id, "# Second\n\nSaved", {
       clientId: "client-a",
-      expectedRevision: 0
+      expectedRevision: secondFile.revision
+    });
+    const renamedSecond = await storage.renameFile(secondFile.id, "  Renamed second  ");
+
+    await storage.setActiveFile(workspace.activeFileId);
+    const savedFirst = await storage.saveFileRecord(workspace.activeFileId, "# First\n\nSaved", {
+      clientId: "client-a",
+      expectedRevision: workspace.activeFile.revision
+    });
+
+    const reloadedWorkspace = await createAppStorage(indexedDB).loadWorkspace(DEFAULT_MARKDOWN);
+    const filesById = new Map(reloadedWorkspace.files.map((file) => [file.id, file]));
+
+    expect(reloadedWorkspace.activeFileId).toBe(workspace.activeFileId);
+    expect(filesById.get(workspace.activeFileId)).toMatchObject({
+      markdown: "# First\n\nSaved",
+      revision: savedFirst.revision
+    });
+    expect(filesById.get(secondFile.id)).toMatchObject({
+      title: renamedSecond.title,
+      markdown: "# Second\n\nSaved",
+      revision: savedSecond.revision
+    });
+    expect(renamedSecond.title).toBe("Renamed second");
+  });
+
+  it("keeps conflicts scoped to the file being saved", async () => {
+    let nextId = 1;
+    const storage = createAppStorage(indexedDB, {
+      createId: () => `file-${nextId++}`
+    });
+    const workspace = await storage.loadWorkspace(DEFAULT_MARKDOWN);
+    const secondFile = await storage.createFile(DEFAULT_MARKDOWN, "Second file");
+
+    const firstSave = await storage.saveFileRecord(workspace.activeFileId, "# First save", {
+      clientId: "client-a",
+      expectedRevision: workspace.activeFile.revision
     });
 
     await expect(
-      storage.saveDraftRecord("# Second", {
+      storage.saveFileRecord(workspace.activeFileId, "# Stale first save", {
         clientId: "client-b",
-        expectedRevision: 0
+        expectedRevision: workspace.activeFile.revision
       })
     ).rejects.toBeInstanceOf(DraftConflictError);
 
-    const overwritten = await storage.saveDraftRecord("# Second", {
-      clientId: "client-b",
-      expectedRevision: first.revision,
-      overwrite: true
-    });
+    await expect(
+      storage.saveFileRecord(secondFile.id, "# Second save", {
+        clientId: "client-b",
+        expectedRevision: secondFile.revision
+      })
+    ).resolves.toMatchObject({ id: secondFile.id, markdown: "# Second save" });
 
-    expect(overwritten).toMatchObject({
-      markdown: "# Second",
-      revision: 2,
-      clientId: "client-b"
+    await expect(
+      storage.saveFileRecord(workspace.activeFileId, "# Overwritten first save", {
+        clientId: "client-b",
+        expectedRevision: firstSave.revision,
+        overwrite: true
+      })
+    ).resolves.toMatchObject({ id: workspace.activeFileId, markdown: "# Overwritten first save" });
+  });
+
+  it("deletes files, switches active file, and does not recreate deleted files on stale saves", async () => {
+    let nextId = 1;
+    const storage = createAppStorage(indexedDB, {
+      createId: () => `file-${nextId++}`
     });
+    const workspace = await storage.loadWorkspace(DEFAULT_MARKDOWN);
+    const secondFile = await storage.createFile(DEFAULT_MARKDOWN, "Second file");
+
+    const afterDeletingFirst = await storage.deleteFile(workspace.activeFileId, DEFAULT_MARKDOWN);
+
+    expect(afterDeletingFirst.activeFileId).toBe(secondFile.id);
+    expect(afterDeletingFirst.files.map((file) => file.id)).toEqual([secondFile.id]);
+    expect(await readValue(`files/${workspace.activeFileId}`)).toBeUndefined();
+
+    await expect(
+      storage.saveFileRecord(workspace.activeFileId, "# Should not return", {
+        clientId: "stale-client",
+        expectedRevision: workspace.activeFile.revision
+      })
+    ).rejects.toBeInstanceOf(StorageUnavailableError);
+    await expect(storage.renameFile(workspace.activeFileId, "Deleted file")).rejects.toBeInstanceOf(StorageUnavailableError);
+
+    const afterDeletingLast = await storage.deleteFile(secondFile.id, DEFAULT_MARKDOWN);
+
+    expect(afterDeletingLast.activeFileId).toBe("legacy-draft");
+    expect(afterDeletingLast.files).toHaveLength(1);
+    expect(afterDeletingLast.activeFile.markdown).toBe(DEFAULT_MARKDOWN);
   });
 
   it("keeps old preference records compatible and clamps stale split ratios", async () => {
@@ -107,15 +182,41 @@ describe("createAppStorage", () => {
     expect(await storage.loadPreferences()).toEqual({ theme: "dark", outlineVisible: false, splitRatio: 30 });
   });
 
-  it("fails explicitly when IndexedDB is unavailable", async () => {
-    const storage = createAppStorage(undefined);
+  it("fails explicitly when IndexedDB is unavailable or times out", async () => {
+    const unavailableStorage = createAppStorage(undefined);
+    const hangingFactory = {
+      open: () => ({})
+    } as unknown as IDBFactory;
+    const timedOutStorage = createAppStorage(hangingFactory, { timeoutMs: 1 });
 
-    await expect(storage.loadDraft()).rejects.toBeInstanceOf(StorageUnavailableError);
-    await expect(storage.saveDraft("# Draft")).rejects.toBeInstanceOf(StorageUnavailableError);
-    await expect(storage.loadDraftRecord()).rejects.toBeInstanceOf(StorageUnavailableError);
-    await expect(
-      storage.saveDraftRecord("# Draft", { clientId: "client-a", expectedRevision: 0 })
-    ).rejects.toBeInstanceOf(StorageUnavailableError);
+    await expect(unavailableStorage.loadDraft()).rejects.toBeInstanceOf(StorageUnavailableError);
+    await expect(unavailableStorage.saveDraft("# Draft")).rejects.toBeInstanceOf(StorageUnavailableError);
+    await expect(unavailableStorage.loadWorkspace(DEFAULT_MARKDOWN)).rejects.toBeInstanceOf(StorageUnavailableError);
+    await expect(timedOutStorage.loadDraft()).rejects.toMatchObject({
+      name: "StorageUnavailableError",
+      reason: "timeout"
+    });
+  });
+
+  it("caps the technical error log without storing markdown content", async () => {
+    const storage = createAppStorage(indexedDB);
+    const secretMarkdown = "# Secret Markdown\n\nDo not log this";
+
+    await storage.saveDraft(secretMarkdown);
+
+    for (let index = 0; index < 25; index += 1) {
+      await storage.appendErrorLog({
+        type: "window error",
+        message: `Error ${index}`,
+        source: "test"
+      });
+    }
+
+    const log = await storage.readErrorLog();
+
+    expect(log).toHaveLength(20);
+    expect(log[0]).toMatchObject({ message: "Error 5" });
+    expect(JSON.stringify(log)).not.toContain(secretMarkdown);
   });
 });
 
@@ -124,15 +225,7 @@ async function seedPreferences(value: unknown): Promise<void> {
 }
 
 async function seedValue(key: string, value: unknown): Promise<void> {
-  const database = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open("live-markdown-preview", 1);
-
-    request.onupgradeneeded = () => {
-      request.result.createObjectStore("app");
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
+  const database = await openTestDatabase();
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -145,4 +238,32 @@ async function seedValue(key: string, value: unknown): Promise<void> {
   } finally {
     database.close();
   }
+}
+
+async function readValue(key: string): Promise<unknown> {
+  const database = await openTestDatabase();
+
+  try {
+    return await new Promise<unknown>((resolve, reject) => {
+      const transaction = database.transaction("app", "readonly");
+      const request = transaction.objectStore("app").get(key);
+
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function openTestDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("live-markdown-preview", 1);
+
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore("app");
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
 }

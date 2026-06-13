@@ -24,11 +24,18 @@ export interface MarkdownEditorProps {
 }
 
 const CODEMIRROR_STYLE_NONCE = "bGl2ZS1tYXJrZG93bi1wcmV2aWV3";
+const GRAMMARLY_OPTOUT_ATTRIBUTES = {
+  "data-enable-grammarly": "false",
+  "data-gramm": "false",
+  "data-gramm_editor": "false",
+  spellcheck: "false"
+};
 
 export function MarkdownEditor({ value, onChange, onEditorReady }: MarkdownEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
+  const suppressChangeRef = useRef(false);
   const valueRef = useRef(value);
   const [loadFailed, setLoadFailed] = useState(false);
 
@@ -57,13 +64,19 @@ export function MarkdownEditor({ value, onChange, onEditorReady }: MarkdownEdito
             drawSelection(),
             EditorState.allowMultipleSelections.of(true),
             EditorView.cspNonce.of(CODEMIRROR_STYLE_NONCE),
+            EditorView.contentAttributes.of(GRAMMARLY_OPTOUT_ATTRIBUTES),
+            EditorView.editorAttributes.of(GRAMMARLY_OPTOUT_ATTRIBUTES),
             markdown(),
             EditorView.lineWrapping,
             highlightActiveLine(),
             keymap.of([{ key: "Ctrl-z", run: undo }, ...defaultKeymap, ...historyKeymap]),
             EditorView.updateListener.of((update) => {
               if (update.docChanged) {
-                onChangeRef.current(update.state.doc.toString());
+                const nextValue = update.state.doc.toString();
+
+                if (!suppressChangeRef.current) {
+                  onChangeRef.current(nextValue);
+                }
               }
             })
           ],
@@ -72,8 +85,12 @@ export function MarkdownEditor({ value, onChange, onEditorReady }: MarkdownEdito
 
         viewRef.current = view;
         onEditorReady({
-          focus: () => view.focus(),
-          redo: () => redo(view),
+          focus: () => {
+            view.focus();
+          },
+          redo: () => {
+            return redo(view);
+          },
           replaceAll: (nextValue, userEvent) => {
             view.dispatch({
               changes: {
@@ -84,7 +101,9 @@ export function MarkdownEditor({ value, onChange, onEditorReady }: MarkdownEdito
               annotations: [Transaction.userEvent.of(userEvent), isolateHistory.of("full")]
             });
           },
-          undo: () => undo(view)
+          undo: () => {
+            return undo(view);
+          }
         });
       })
       .catch(() => {
@@ -114,14 +133,20 @@ export function MarkdownEditor({ value, onChange, onEditorReady }: MarkdownEdito
       return;
     }
 
-    view.dispatch({
-      changes: {
-        from: 0,
-        to: current.length,
-        insert: value
-      },
-      annotations: [Transaction.userEvent.of("input"), Transaction.addToHistory.of(false)]
-    });
+    suppressChangeRef.current = true;
+
+    try {
+      view.dispatch({
+        changes: {
+          from: 0,
+          to: current.length,
+          insert: value
+        },
+        annotations: [Transaction.addToHistory.of(false)]
+      });
+    } finally {
+      suppressChangeRef.current = false;
+    }
   }, [value]);
 
   return (
