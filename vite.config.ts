@@ -7,10 +7,10 @@ import { cloudflare } from "@cloudflare/vite-plugin";
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
 const contentSecurityPolicy =
-  "default-src 'self'; script-src 'self'; style-src 'self' 'nonce-bGl2ZS1tYXJrZG93bi1wcmV2aWV3'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'";
+  "default-src 'self'; script-src 'self'; style-src 'self' 'nonce-bGl2ZS1tYXJrZG93bi1wcmV2aWV3'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; worker-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'";
 
-export default defineConfig({
-  plugins: [preact(), cloudflare()],
+export default defineConfig(({ mode }) => ({
+  plugins: [preact(), ...(mode === "test" ? [] : [cloudflare()])],
   resolve: {
     alias: {
       "decode-named-character-reference": resolve(
@@ -32,4 +32,4 @@ export default defineConfig({
       "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()"
     }
   }
-});
+}));

@@ -173,13 +173,36 @@ describe("createAppStorage", () => {
     const storage = createAppStorage(indexedDB);
 
     await seedPreferences({ theme: "dark" });
-    expect(await storage.loadPreferences()).toEqual({ theme: "dark", outlineVisible: true, splitRatio: 50 });
+    expect(await storage.loadPreferences()).toEqual({
+      theme: "dark",
+      colorScheme: "vs-code-dark-plus",
+      outlineVisible: true,
+      splitRatio: 50
+    });
 
     await seedPreferences({ theme: "dark", outlineVisible: false, splitRatio: 95 });
-    expect(await storage.loadPreferences()).toEqual({ theme: "dark", outlineVisible: false, splitRatio: 70 });
+    expect(await storage.loadPreferences()).toEqual({
+      theme: "dark",
+      colorScheme: "vs-code-dark-plus",
+      outlineVisible: false,
+      splitRatio: 70
+    });
 
     await seedPreferences({ theme: "dark", outlineVisible: false, splitRatio: 10 });
-    expect(await storage.loadPreferences()).toEqual({ theme: "dark", outlineVisible: false, splitRatio: 30 });
+    expect(await storage.loadPreferences()).toEqual({
+      theme: "dark",
+      colorScheme: "vs-code-dark-plus",
+      outlineVisible: false,
+      splitRatio: 30
+    });
+
+    await seedPreferences({ theme: "light", colorScheme: "dracula", outlineVisible: true, splitRatio: 50 });
+    expect(await storage.loadPreferences()).toEqual({
+      theme: "dark",
+      colorScheme: "dracula",
+      outlineVisible: true,
+      splitRatio: 50
+    });
   });
 
   it("fails explicitly when IndexedDB is unavailable or times out", async () => {

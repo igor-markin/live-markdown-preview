@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks"
 import type { MarkdownEditorHandle } from "./components/MarkdownEditor";
 import { StatusBar } from "./components/StatusBar";
 import { Toolbar } from "./components/Toolbar";
+import { COLOR_SCHEMES, getColorScheme } from "./colorSchemes";
 import { copyTextToClipboard } from "./clipboard";
 import { DEFAULT_MARKDOWN, DEFAULT_PREFERENCES } from "./defaults";
 import { useMarkdownRender } from "./hooks/useMarkdownRender";
@@ -28,7 +29,7 @@ import {
   StorageUnavailableError,
   type FileRecord
 } from "./storage";
-import type { Preferences, SaveState, Theme, ViewMode } from "./types";
+import type { ColorSchemeId, Preferences, SaveState, Theme, ViewMode } from "./types";
 
 type ConflictAction = null | "reload";
 type MarkdownEditorComponent = typeof import("./components/MarkdownEditor").MarkdownEditor;
@@ -37,12 +38,20 @@ type PendingSave = {
   markdown: string;
   expectedRevision: number;
 };
+type EmergencyDraftBackup = {
+  version: 1;
+  fileId: string;
+  markdown: string;
+  expectedRevision: number;
+  updatedAt: number;
+};
 
 const ACTION_FEEDBACK_MS = 650;
 const AUTOSAVE_DELAY_MS = 300;
 const SPLIT_INDICATOR_MS = 900;
 const GITHUB_URL = "https://github.com/igor-markin/live-markdown-preview";
 const DRAFT_CHANNEL_NAME = "live-markdown-preview:draft";
+const EMERGENCY_DRAFT_BACKUP_KEY = "live-markdown-preview:emergency-draft";
 
 export function App() {
   const storageRef = useRef(createAppStorage());
@@ -70,6 +79,7 @@ export function App() {
   const [markdown, setMarkdown] = useState(DEFAULT_MARKDOWN);
   const [EditorComponent, setEditorComponent] = useState<MarkdownEditorComponent | null>(null);
   const [theme, setTheme] = useState<Theme>(DEFAULT_PREFERENCES.theme);
+  const [colorScheme, setColorScheme] = useState<ColorSchemeId>(DEFAULT_PREFERENCES.colorScheme);
   const [outlineVisible, setOutlineVisible] = useState(DEFAULT_PREFERENCES.outlineVisible);
   const [splitRatio, setSplitRatio] = useState(DEFAULT_PREFERENCES.splitRatio);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
@@ -160,6 +170,7 @@ export function App() {
       remoteFileRef.current = null;
       storageWritePausedRef.current = false;
       markdownRef.current = record.markdown;
+      clearEmergencyDraftBackup(record.id);
 
       setActiveFileId(record.id);
       setPendingConflictAction(null);
@@ -214,6 +225,7 @@ export function App() {
           currentFileRevisionRef.current = record.revision;
 
           if (markdownRef.current === record.markdown && !pendingSavesRef.current.has(record.id)) {
+            clearEmergencyDraftBackup(record.id);
             setPendingConflictAction(null);
             setSaveState("saved");
           } else {
@@ -257,6 +269,7 @@ export function App() {
           if (storedRecord?.markdown === markdownRef.current) {
             currentFileRevisionRef.current = storedRecord.revision;
             remoteFileRef.current = null;
+            clearEmergencyDraftBackup(storedRecord.id);
             setPendingConflictAction(null);
             setSaveState("saved");
             flushPendingSaveRef.current();
@@ -347,7 +360,39 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const persistEmergencyDraft = () => {
+      const fileId = activeFileIdRef.current;
+
+      if (!loadedRef.current || !fileId) {
+        return;
+      }
+
+      if (!hasUnsavedDraftForFile(fileId, saveStateRef.current, pendingSavesRef.current, inFlightSaveRef.current)) {
+        clearEmergencyDraftBackup(fileId);
+        return;
+      }
+
+      writeEmergencyDraftBackup({
+        version: 1,
+        fileId,
+        markdown: markdownRef.current,
+        expectedRevision: fileRevisionsRef.current.get(fileId) ?? currentFileRevisionRef.current,
+        updatedAt: Date.now()
+      });
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        persistEmergencyDraft();
+      }
+    };
+
+    window.addEventListener("pagehide", persistEmergencyDraft);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
+      window.removeEventListener("pagehide", persistEmergencyDraft);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+
       if (actionFeedbackTimeoutRef.current !== null) {
         window.clearTimeout(actionFeedbackTimeoutRef.current);
       }
@@ -519,15 +564,40 @@ export function App() {
         fileRevisionsRef.current = new Map(storedWorkspace.files.map((file) => [file.id, file.revision]));
         activeFileIdRef.current = storedWorkspace.activeFileId;
         currentFileRevisionRef.current = storedWorkspace.activeFile.revision;
-        markdownRef.current = storedWorkspace.activeFile.markdown;
+        const emergencyBackup = readEmergencyDraftBackup();
+        const restoredFromEmergencyBackup = shouldRestoreEmergencyDraft(emergencyBackup, storedWorkspace.activeFile);
+        const activeFile = restoredFromEmergencyBackup
+          ? {
+              ...storedWorkspace.activeFile,
+              markdown: emergencyBackup.markdown
+            }
+          : storedWorkspace.activeFile;
+        const workspaceFiles = storedWorkspace.files.map((file) => (file.id === activeFile.id ? activeFile : file));
 
-        setFiles(storedWorkspace.files);
+        markdownRef.current = activeFile.markdown;
+
+        setFiles(workspaceFiles);
         setActiveFileId(storedWorkspace.activeFileId);
-        setMarkdown(storedWorkspace.activeFile.markdown);
+        setMarkdown(activeFile.markdown);
         setTheme(storedPreferences.theme);
+        setColorScheme(storedPreferences.colorScheme);
         setOutlineVisible(storedPreferences.outlineVisible);
         setSplitRatio(storedPreferences.splitRatio);
-        setSaveState("saved");
+        setSaveState(restoredFromEmergencyBackup ? "saving" : "saved");
+
+        if (restoredFromEmergencyBackup) {
+          pendingSavesRef.current.set(activeFile.id, {
+            fileId: activeFile.id,
+            markdown: activeFile.markdown,
+            expectedRevision: emergencyBackup.expectedRevision
+          });
+          completeAction("storage", "Unsaved draft restored");
+          window.setTimeout(() => {
+            flushPendingSaveRef.current();
+          }, 0);
+        } else {
+          clearEmergencyDraftBackup(storedWorkspace.activeFile.id);
+        }
       } catch (error) {
         if (!cancelled) {
           captureStorageError(error, "load workspace");
@@ -546,22 +616,23 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [captureStorageError]);
+  }, [captureStorageError, completeAction]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.colorScheme = colorScheme;
 
     if (!loadedRef.current) {
       return;
     }
 
-    const preferences: Preferences = { theme, outlineVisible, splitRatio };
+    const preferences: Preferences = { theme, colorScheme, outlineVisible, splitRatio };
     void storageRef.current.savePreferences(preferences).catch((error: unknown) => {
       captureStorageError(error, "save preferences");
       storageWritePausedRef.current = true;
       setSaveState("unavailable");
     });
-  }, [captureStorageError, outlineVisible, splitRatio, theme]);
+  }, [captureStorageError, colorScheme, outlineVisible, splitRatio, theme]);
 
   const copyMarkdown = useCallback(async () => {
     await runClipboardAction(
@@ -609,12 +680,16 @@ export function App() {
     );
   }, [completeAction, isPreviewFresh, previewHtml]);
 
-  const toggleTheme = useCallback(() => {
-    const nextTheme = theme === "light" ? "dark" : "light";
+  const selectColorScheme = useCallback(
+    (nextSchemeId: ColorSchemeId) => {
+      const nextScheme = getColorScheme(nextSchemeId);
 
-    setTheme(nextTheme);
-    completeAction("theme", nextTheme === "dark" ? "Dark theme" : "Light theme");
-  }, [completeAction, theme]);
+      setColorScheme(nextScheme.id);
+      setTheme(nextScheme.theme);
+      completeAction("scheme", `${nextScheme.name} scheme`);
+    },
+    [completeAction]
+  );
 
   const exportPdf = useCallback(() => {
     if (!isPreviewFresh("pdf")) {
@@ -854,6 +929,7 @@ export function App() {
       currentFileRevisionRef.current = record.revision;
       fileRevisionsRef.current.set(record.id, record.revision);
       remoteFileRef.current = null;
+      clearEmergencyDraftBackup(record.id);
       setPendingConflictAction(null);
       setSaveState("saved");
       upsertFile(record);
@@ -925,6 +1001,11 @@ export function App() {
     },
     [showSplitIndicatorBriefly]
   );
+
+  const workspaceStyle = {
+    "--editor-size": `${splitRatio}fr`,
+    "--preview-size": `${100 - splitRatio}fr`
+  } as JSX.CSSProperties & Record<"--editor-size" | "--preview-size", string>;
 
   return (
     <div className="app-shell">
@@ -1001,109 +1082,114 @@ export function App() {
 
         <Toolbar
           activeAction={activeAction}
+          colorScheme={colorScheme}
+          colorSchemes={COLOR_SCHEMES}
           githubUrl={GITHUB_URL}
-          theme={theme}
           onCopyHtml={copyHtml}
           onCopyMarkdown={copyMarkdown}
           onExportPdf={exportPdf}
           onOpenHelp={openHelp}
-          onToggleTheme={toggleTheme}
+          onSelectColorScheme={selectColorScheme}
         />
       </header>
 
       <main
         ref={workspaceRef}
-        className={`workspace mode-${effectiveViewMode} split-${splitRatio}${isResizing ? " is-resizing" : ""}`}
+        className={`workspace sidebar-${outlineVisible ? "visible" : "hidden"} mode-${effectiveViewMode} split-${splitRatio}${
+          isResizing ? " is-resizing" : ""
+        }`}
+        style={workspaceStyle}
       >
-        <section className={`pane editor-pane${outlineVisible ? "" : " outline-hidden"}`} aria-label="Markdown editor">
-          {outlineVisible && (
-            <aside className="workspace-sidebar" aria-label="File manager and document outline">
-              <section className="sidebar-section file-manager-panel" aria-label="Files">
-                <div className="sidebar-title-row">
-                  <div className="outline-title">Files</div>
-                  <button type="button" className="sidebar-icon-button" onClick={createNewFile} title="New file" aria-label="New file">
-                    <Plus size={15} aria-hidden="true" />
-                  </button>
-                </div>
+        {outlineVisible && (
+          <aside className="workspace-sidebar" aria-label="File manager and document outline">
+            <section className="sidebar-section file-manager-panel" aria-label="Files">
+              <div className="sidebar-title-row">
+                <div className="outline-title">Files</div>
+                <button type="button" className="sidebar-icon-button" onClick={createNewFile} title="New file" aria-label="New file">
+                  <Plus size={15} aria-hidden="true" />
+                </button>
+              </div>
 
-                <ol className="file-list">
-                  {files.length === 0 ? (
-                    <li className="file-list-empty">Loading file</li>
-                  ) : (
-                    files.map((file) => (
-                      <li
-                        key={file.id}
-                        className={`${file.id === activeFileId ? "is-active" : ""}${renamingFileId === file.id ? " is-renaming" : ""}`}
-                      >
-                        {renamingFileId === file.id ? (
-                          <form
-                            className="file-rename-form"
-                            onSubmit={(event) => {
-                              event.preventDefault();
-                              void commitRenameFile(file.id);
-                            }}
-                          >
-                            <input
-                              type="text"
-                              value={renameDraft}
-                              autoFocus
-                              aria-label={`Rename ${file.title}`}
-                              onInput={(event) => setRenameDraft(event.currentTarget.value)}
-                              onKeyDown={(event) => handleRenameKeyDown(event, file.id)}
-                            />
-                            <button type="submit" title="Save file name" aria-label="Save file name">
-                              <Check size={14} aria-hidden="true" />
-                            </button>
-                            <button type="button" onClick={cancelRenameFile} title="Cancel rename" aria-label="Cancel rename">
-                              <X size={14} aria-hidden="true" />
-                            </button>
-                          </form>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              className="file-list-button"
-                              onClick={() => void switchActiveFile(file.id)}
-                              onDblClick={() => beginRenameFile(file)}
-                              aria-pressed={file.id === activeFileId}
-                              title={file.title}
-                            >
-                              <FileText size={15} aria-hidden="true" />
-                              <span>{file.title}</span>
-                            </button>
-                            <button
-                              type="button"
-                              className="file-delete-button"
-                              onClick={() => void deleteFile(file.id)}
-                              title={`Delete ${file.title}`}
-                              aria-label={`Delete ${file.title}`}
-                            >
-                              <Trash2 size={14} aria-hidden="true" />
-                            </button>
-                          </>
-                        )}
-                      </li>
-                    ))
-                  )}
-                </ol>
-              </section>
-
-              <section className="sidebar-section outline" aria-label="Document outline">
-                <div className="outline-title">Outline</div>
-                {headings.length > 0 ? (
-                  <ol>
-                    {headings.map((heading) => (
-                      <li key={`${heading.id}-${heading.line}`} className={`outline-level-${heading.level}`}>
-                        <a href={`#${heading.id}`}>{heading.text || "Untitled"}</a>
-                      </li>
-                    ))}
-                  </ol>
+              <ol className="file-list">
+                {files.length === 0 ? (
+                  <li className="file-list-empty">Loading file</li>
                 ) : (
-                  <p>No headings</p>
+                  files.map((file) => (
+                    <li
+                      key={file.id}
+                      className={`${file.id === activeFileId ? "is-active" : ""}${renamingFileId === file.id ? " is-renaming" : ""}`}
+                    >
+                      {renamingFileId === file.id ? (
+                        <form
+                          className="file-rename-form"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            void commitRenameFile(file.id);
+                          }}
+                        >
+                          <input
+                            type="text"
+                            value={renameDraft}
+                            autoFocus
+                            aria-label={`Rename ${file.title}`}
+                            onInput={(event) => setRenameDraft(event.currentTarget.value)}
+                            onKeyDown={(event) => handleRenameKeyDown(event, file.id)}
+                          />
+                          <button type="submit" title="Save file name" aria-label="Save file name">
+                            <Check size={14} aria-hidden="true" />
+                          </button>
+                          <button type="button" onClick={cancelRenameFile} title="Cancel rename" aria-label="Cancel rename">
+                            <X size={14} aria-hidden="true" />
+                          </button>
+                        </form>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="file-list-button"
+                            onClick={() => void switchActiveFile(file.id)}
+                            onDblClick={() => beginRenameFile(file)}
+                            aria-pressed={file.id === activeFileId}
+                            title={file.title}
+                          >
+                            <FileText size={15} aria-hidden="true" />
+                            <span>{file.title}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="file-delete-button"
+                            onClick={() => void deleteFile(file.id)}
+                            title={`Delete ${file.title}`}
+                            aria-label={`Delete ${file.title}`}
+                          >
+                            <Trash2 size={14} aria-hidden="true" />
+                          </button>
+                        </>
+                      )}
+                    </li>
+                  ))
                 )}
-              </section>
-            </aside>
-          )}
+              </ol>
+            </section>
+
+            <section className="sidebar-section outline" aria-label="Document outline">
+              <div className="outline-title">Outline</div>
+              {headings.length > 0 ? (
+                <ol>
+                  {headings.map((heading) => (
+                    <li key={`${heading.id}-${heading.line}`} className={`outline-level-${heading.level}`}>
+                      <a href={`#${heading.id}`}>{heading.text || "Untitled"}</a>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p>No headings</p>
+              )}
+            </section>
+          </aside>
+        )}
+
+        <section className="pane editor-pane" aria-label="Markdown editor">
 
           <div className="editor-shell">
             {EditorComponent ? (
@@ -1306,6 +1392,98 @@ function parseFileBroadcast(value: unknown): FileRecord | null {
   }
 
   return record;
+}
+
+function hasUnsavedDraftForFile(
+  fileId: string,
+  saveState: SaveState,
+  pendingSaves: Map<string, PendingSave>,
+  inFlightSave: PendingSave | null
+): boolean {
+  return (
+    pendingSaves.has(fileId) ||
+    inFlightSave?.fileId === fileId ||
+    saveState === "saving" ||
+    saveState === "unavailable" ||
+    saveState === "conflict"
+  );
+}
+
+function writeEmergencyDraftBackup(backup: EmergencyDraftBackup): void {
+  try {
+    sessionStorage.setItem(EMERGENCY_DRAFT_BACKUP_KEY, JSON.stringify(backup));
+  } catch {
+    // Session storage is a best-effort reload safety net; IndexedDB remains the source of truth.
+  }
+}
+
+function readEmergencyDraftBackup(): EmergencyDraftBackup | null {
+  try {
+    return normalizeEmergencyDraftBackup(JSON.parse(sessionStorage.getItem(EMERGENCY_DRAFT_BACKUP_KEY) ?? "null"));
+  } catch {
+    return null;
+  }
+}
+
+function clearEmergencyDraftBackup(fileId?: string): void {
+  try {
+    if (!fileId) {
+      sessionStorage.removeItem(EMERGENCY_DRAFT_BACKUP_KEY);
+      return;
+    }
+
+    const backup = readEmergencyDraftBackup();
+
+    if (!backup || backup.fileId === fileId) {
+      sessionStorage.removeItem(EMERGENCY_DRAFT_BACKUP_KEY);
+    }
+  } catch {
+    // Ignore blocked or corrupted session storage.
+  }
+}
+
+function normalizeEmergencyDraftBackup(value: unknown): EmergencyDraftBackup | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const candidate = value as Partial<EmergencyDraftBackup>;
+  const expectedRevision = Number(candidate.expectedRevision);
+  const updatedAt = Number(candidate.updatedAt);
+
+  if (
+    candidate.version !== 1 ||
+    typeof candidate.fileId !== "string" ||
+    candidate.fileId.length === 0 ||
+    typeof candidate.markdown !== "string" ||
+    !Number.isFinite(expectedRevision) ||
+    expectedRevision < 0 ||
+    !Number.isInteger(expectedRevision) ||
+    !Number.isFinite(updatedAt) ||
+    updatedAt < 0
+  ) {
+    return null;
+  }
+
+  return {
+    version: 1,
+    fileId: candidate.fileId,
+    markdown: candidate.markdown,
+    expectedRevision,
+    updatedAt
+  };
+}
+
+function shouldRestoreEmergencyDraft(
+  backup: EmergencyDraftBackup | null,
+  activeFile: FileRecord
+): backup is EmergencyDraftBackup {
+  return Boolean(
+    backup &&
+      backup.fileId === activeFile.id &&
+      backup.markdown !== activeFile.markdown &&
+      backup.updatedAt >= activeFile.updatedAt
+  );
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {

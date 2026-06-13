@@ -1,4 +1,5 @@
 import type { Preferences } from "./types";
+import { DEFAULT_LIGHT_COLOR_SCHEME } from "./colorSchemes";
 
 export const DEFAULT_MARKDOWN = `# Untitled draft
 
@@ -16,6 +17,7 @@ export const DEFAULT_MARKDOWN = `# Untitled draft
 
 export const DEFAULT_PREFERENCES: Preferences = {
   theme: "light",
+  colorScheme: DEFAULT_LIGHT_COLOR_SCHEME,
   outlineVisible: true,
   splitRatio: 50
 };

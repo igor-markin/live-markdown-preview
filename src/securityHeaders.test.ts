@@ -10,11 +10,22 @@ describe("Cloudflare security headers", () => {
     expect(headers).not.toContain("Content-Security-Policy-Report-Only");
     expect(headers).toContain("style-src 'self' 'nonce-bGl2ZS1tYXJrZG93bi1wcmV2aWV3'");
     expect(headers).not.toContain("'unsafe-inline'");
+    expect(headers).toContain("img-src 'self' data:");
+    expect(headers).not.toContain("img-src 'self' data: blob:");
     expect(headers).toContain("worker-src 'self'");
     expect(headers).not.toContain("worker-src 'self' blob:");
+    expect(headers).toContain("frame-src 'none'");
     expect(headers).toContain("object-src 'none'");
     expect(headers).toContain("frame-ancestors 'none'");
     expect(headers).toContain("form-action 'none'");
     expect(headers).toContain("Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()");
+  });
+
+  it("keeps Cloudflare observability disabled for the no-telemetry deployment", () => {
+    const wranglerConfig = readFileSync(resolve(process.cwd(), "wrangler.jsonc"), "utf8");
+
+    expect(wranglerConfig).toContain('"observability"');
+    expect(wranglerConfig).toContain('"enabled": false');
+    expect(wranglerConfig).not.toContain('"enabled": true');
   });
 });

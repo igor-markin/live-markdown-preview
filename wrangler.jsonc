@@ -3,7 +3,7 @@
   "name": "live-markdown-preview",
   "compatibility_date": "2026-06-12",
   "observability": {
-    "enabled": true
+    "enabled": false
   },
   "assets": {
     "not_found_handling": "single-page-application"

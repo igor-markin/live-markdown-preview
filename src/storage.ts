@@ -1,4 +1,3 @@
-import { DEFAULT_PREFERENCES } from "./defaults";
 import { normalizePreferences } from "./preferences";
 import type { Preferences } from "./types";
 
@@ -149,10 +148,7 @@ export function createAppStorage(factory?: IDBFactory, config: AppStorageConfig 
       return saveFileRecordValue(openDb, fileId, markdown, options, timeoutMs, now);
     },
     async loadPreferences() {
-      return normalizePreferences({
-        ...DEFAULT_PREFERENCES,
-        ...((await getValue<Partial<Preferences>>(openDb, PREFERENCES_KEY, timeoutMs)) ?? {})
-      });
+      return normalizePreferences(await getValue<Partial<Preferences>>(openDb, PREFERENCES_KEY, timeoutMs));
     },
     async savePreferences(preferences: Preferences) {
       await setValue(openDb, PREFERENCES_KEY, preferences, timeoutMs);

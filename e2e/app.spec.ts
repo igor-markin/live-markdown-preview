@@ -74,7 +74,7 @@ test("desktop layout keeps chrome visible, keeps sidebar, and persists split rat
     "Help",
     "Open GitHub repository",
     "separator",
-    "Toggle Theme"
+    "Color scheme"
   ]);
   expect(await page.locator(".toolbar .toolbar-separator").count()).toBe(2);
 
@@ -124,7 +124,8 @@ test("desktop layout keeps chrome visible, keeps sidebar, and persists split rat
   expect(topbarControlsOverflow.scrollWidth).toBeLessThanOrEqual(topbarControlsOverflow.clientWidth + 1);
 
   await expect(page.locator(".workspace-sidebar")).toBeVisible();
-  await expect(page.locator(".editor-pane .outline")).toBeVisible();
+  await expect(page.locator(".workspace-sidebar .outline")).toBeVisible();
+  await expect(page.locator(".editor-pane .outline")).toHaveCount(0);
   await expect(page.locator(".preview-pane .outline")).toHaveCount(0);
 
   const outlineBox = await page.locator(".workspace-sidebar").boundingBox();
@@ -167,7 +168,7 @@ test("desktop layout keeps chrome visible, keeps sidebar, and persists split rat
   await expect(page.locator(".statusbar")).toBeInViewport();
 
   await page.reload();
-  await expect(page.locator(".editor-pane .outline")).toBeVisible();
+  await expect(page.locator(".workspace-sidebar .outline")).toBeVisible();
   await expect(splitter).toHaveAttribute("aria-valuenow", String(splitAfterDrag));
 
   await splitter.focus();
@@ -210,6 +211,7 @@ test("PDF export, help, and GitHub action work without About", async ({ page }) 
     "href",
     "https://github.com/igor-markin/live-markdown-preview"
   );
+  await expect(page.getByRole("link", { name: "Open GitHub repository" })).toHaveAttribute("rel", "noopener noreferrer");
 
   await page.getByRole("button", { name: "Export PDF" }).click();
   await expect.poll(() => page.evaluate(() => (window as Window & { __printCalled?: boolean }).__printCalled)).toBe(true);
@@ -449,16 +451,24 @@ test("desktop and mobile view modes expose the expected panes", async ({ page })
   await expect(page.getByRole("separator", { name: "Resize Markdown and Preview panes" })).toBeVisible();
 
   await page.getByRole("button", { name: "Markdown", exact: true }).click();
+  await expect(page.locator(".workspace-sidebar")).toBeVisible();
   await expect(page.locator(".editor-pane")).toBeVisible();
   await expect(page.locator(".preview-pane")).toBeHidden();
 
   await page.getByRole("button", { name: "Split", exact: true }).click();
+  await expect(page.locator(".workspace-sidebar")).toBeVisible();
   await expect(page.locator(".editor-pane")).toBeVisible();
   await expect(page.locator(".preview-pane")).toBeVisible();
 
   await page.getByRole("button", { name: "Preview", exact: true }).click();
+  await expect(page.locator(".workspace-sidebar")).toBeVisible();
   await expect(page.locator(".editor-pane")).toBeHidden();
   await expect(page.locator(".preview-pane")).toBeVisible();
+  const sidebarBox = await page.locator(".workspace-sidebar").boundingBox();
+  const previewBox = await page.locator(".preview-pane").boundingBox();
+  expect(sidebarBox).not.toBeNull();
+  expect(previewBox).not.toBeNull();
+  expect(Math.round(sidebarBox!.x + sidebarBox!.width)).toBeLessThanOrEqual(Math.round(previewBox!.x));
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByRole("button", { name: "Split", exact: true })).toHaveCount(0);
@@ -467,24 +477,57 @@ test("desktop and mobile view modes expose the expected panes", async ({ page })
   await expect(page.locator(".preview-pane")).toBeHidden();
 });
 
-test("selected text remains visible on the active editor line in both themes", async ({ page }) => {
+test("color scheme picker applies popular IDE schemes and persists the choice", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.locator("html")).toHaveAttribute("data-color-scheme", "github-light");
+  await page.locator(".scheme-picker summary").click();
+
+  const schemeOptions = page.getByRole("menuitemradio");
+
+  await expect(schemeOptions).toHaveCount(19);
+  await expect(page.getByRole("menuitemradio", { name: "VS Code Dark+" })).toBeVisible();
+  await expect(page.getByRole("menuitemradio", { name: "One Dark Pro" })).toBeVisible();
+  await expect(page.getByRole("menuitemradio", { name: "Dracula" })).toBeVisible();
+  await expect(page.getByRole("menuitemradio", { name: "Catppuccin Mocha" })).toBeVisible();
+  await expect(page.getByRole("menuitemradio", { name: "Monokai" })).toBeVisible();
+  await expect(page.getByRole("menuitemradio", { name: "Solarized Light" })).toBeVisible();
+  await expect(page.getByRole("menuitemradio", { name: "Nord" })).toBeVisible();
+
+  await page.getByRole("menuitemradio", { name: "Dracula" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-color-scheme", "dracula");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await waitForPreferences(page, { colorScheme: "dracula", theme: "dark" });
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-color-scheme", "dracula");
+  await expect(page.locator(".scheme-picker summary")).toContainText("Dracula");
+});
+
+test("caret and selected text remain visible on the active editor line in light and dark schemes", async ({ page }) => {
   await page.goto("/");
   await replaceEditorText(page, "# Selection\n\nHighlight me");
   await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
 
   await expect(page.locator(".cm-selectionBackground").first()).toBeVisible();
-  const lightSelectionState = await selectionColors(page);
+  const lightSelectionState = await editorVisibilityColors(page);
   expect(lightSelectionState.selection).not.toBe("rgba(0, 0, 0, 0)");
   expect(lightSelectionState.selection).not.toBe(lightSelectionState.activeLine);
+  expect(lightSelectionState.selectedTextContrast).toBeGreaterThanOrEqual(4.5);
+  expect(lightSelectionState.cursorContrast).toBeGreaterThanOrEqual(3);
 
-  await page.getByRole("button", { name: "Toggle Theme" }).click();
+  await page.locator(".scheme-picker summary").click();
+  await page.getByRole("menuitemradio", { name: "Dracula" }).click();
   await replaceEditorText(page, "# Dark selection\n\nHighlight me too");
   await page.keyboard.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
 
   await expect(page.locator(".cm-selectionBackground").first()).toBeVisible();
-  const darkSelectionState = await selectionColors(page);
+  const darkSelectionState = await editorVisibilityColors(page);
   expect(darkSelectionState.selection).not.toBe("rgba(0, 0, 0, 0)");
   expect(darkSelectionState.selection).not.toBe(darkSelectionState.activeLine);
+  expect(darkSelectionState.selectionActiveLineDistance).toBeGreaterThanOrEqual(32);
+  expect(darkSelectionState.selectedTextContrast).toBeGreaterThanOrEqual(4.5);
+  expect(darkSelectionState.cursorContrast).toBeGreaterThanOrEqual(3);
 });
 
 test("sidebar file manager creates, switches, removes, and preserves file contents", async ({ page }) => {
@@ -536,6 +579,18 @@ test("rapid typing saves the final markdown without a false conflict", async ({ 
 
   await waitForDraft(page, "# Rapid\n\nfinal markdown");
   await expect(page.locator(".statusbar")).not.toContainText("Draft changed in another tab");
+});
+
+test("reload during pending autosave restores the latest active draft", async ({ page }) => {
+  const draft = "# Reload race\n\nLatest unsaved text";
+
+  await page.goto("/");
+  await replaceEditorText(page, draft);
+  await page.reload();
+
+  await expect(page.locator(".cm-content")).toContainText("Latest unsaved text");
+  await expect(page.locator(".markdown-preview h1")).toHaveText("Reload race");
+  await waitForDraft(page, draft);
 });
 
 test("reverting to loaded markdown before autosave does not save stale intermediate text", async ({ page }) => {
@@ -600,11 +655,66 @@ async function replaceEditorText(page: Page, text: string): Promise<void> {
   await page.keyboard.insertText(text);
 }
 
-async function selectionColors(page: Page): Promise<{ activeLine: string; selection: string }> {
-  return page.evaluate(() => ({
-    activeLine: getComputedStyle(document.querySelector(".cm-activeLine") as Element).backgroundColor,
-    selection: getComputedStyle(document.querySelector(".cm-selectionBackground") as Element).backgroundColor
-  }));
+async function editorVisibilityColors(page: Page): Promise<{
+  activeLine: string;
+  cursor: string;
+  cursorContrast: number;
+  selection: string;
+  selectionActiveLineDistance: number;
+  selectedTextContrast: number;
+}> {
+  return page.evaluate(() => {
+    type Rgba = { a: number; b: number; g: number; r: number };
+
+    const parseColor = (value: string): Rgba => {
+      const [r = 0, g = 0, b = 0, a = 1] = value.match(/[\d.]+/g)?.map(Number) ?? [];
+
+      return { a, b, g, r };
+    };
+    const composite = (foreground: Rgba, background: Rgba): Rgba => ({
+      a: 1,
+      b: foreground.b * foreground.a + background.b * (1 - foreground.a),
+      g: foreground.g * foreground.a + background.g * (1 - foreground.a),
+      r: foreground.r * foreground.a + background.r * (1 - foreground.a)
+    });
+    const channelLuminance = (value: number) => {
+      const normalized = value / 255;
+
+      return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+    };
+    const luminance = (color: Rgba) =>
+      0.2126 * channelLuminance(color.r) + 0.7152 * channelLuminance(color.g) + 0.0722 * channelLuminance(color.b);
+    const contrast = (first: Rgba, second: Rgba) => {
+      const lighter = Math.max(luminance(first), luminance(second));
+      const darker = Math.min(luminance(first), luminance(second));
+
+      return (lighter + 0.05) / (darker + 0.05);
+    };
+    const distance = (first: Rgba, second: Rgba) =>
+      Math.hypot(first.r - second.r, first.g - second.g, first.b - second.b);
+
+    const editor = document.querySelector(".cm-editor") as Element;
+    const line = document.querySelector(".cm-line") as Element;
+    const cursor = document.querySelector(".cm-cursor") as Element;
+    const activeLine = document.querySelector(".cm-activeLine") as Element;
+    const selection = document.querySelector(".cm-selectionBackground") as Element;
+    const editorBackground = parseColor(getComputedStyle(editor).backgroundColor);
+    const textColor = parseColor(getComputedStyle(line).color);
+    const cursorColor = parseColor(getComputedStyle(cursor).borderLeftColor);
+    const activeLineBackground = parseColor(getComputedStyle(activeLine).backgroundColor);
+    const selectionBackground = parseColor(getComputedStyle(selection).backgroundColor);
+    const activeLineComposite = composite(activeLineBackground, editorBackground);
+    const selectionComposite = composite(selectionBackground, editorBackground);
+
+    return {
+      activeLine: getComputedStyle(activeLine).backgroundColor,
+      cursor: getComputedStyle(cursor).borderLeftColor,
+      cursorContrast: contrast(cursorColor, editorBackground),
+      selection: getComputedStyle(selection).backgroundColor,
+      selectionActiveLineDistance: distance(selectionComposite, activeLineComposite),
+      selectedTextContrast: contrast(textColor, selectionComposite)
+    };
+  });
 }
 
 async function seedDraft(page: Page, markdown: string): Promise<void> {
@@ -661,12 +771,12 @@ async function seedDraft(page: Page, markdown: string): Promise<void> {
 
 async function waitForPreferences(
   page: Page,
-  expected: { outlineVisible: boolean; splitRatio: number }
+  expected: { colorScheme?: string; outlineVisible?: boolean; splitRatio?: number; theme?: string }
 ): Promise<void> {
   await expect
     .poll(async () => {
       return page.evaluate(() => {
-        return new Promise<{ outlineVisible?: boolean; splitRatio?: number } | null>((resolve, reject) => {
+        return new Promise<{ colorScheme?: string; outlineVisible?: boolean; splitRatio?: number; theme?: string } | null>((resolve, reject) => {
           const request = indexedDB.open("live-markdown-preview", 1);
 
           request.onerror = () => reject(request.error);
@@ -676,7 +786,10 @@ async function waitForPreferences(
             const getRequest = transaction.objectStore("app").get("preferences");
 
             getRequest.onsuccess = () => {
-              resolve((getRequest.result as { outlineVisible?: boolean; splitRatio?: number } | undefined) ?? null);
+              resolve(
+                (getRequest.result as { colorScheme?: string; outlineVisible?: boolean; splitRatio?: number; theme?: string } | undefined) ??
+                  null
+              );
               database.close();
             };
             getRequest.onerror = () => {

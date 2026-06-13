@@ -1,35 +1,41 @@
 import {
+  Check,
+  ChevronDown,
   Clipboard,
   Code2,
   CircleHelp,
   GitFork,
-  Moon,
-  Printer,
-  Sun
+  Palette,
+  Printer
 } from "lucide-preact";
-import type { Theme } from "../types";
+import type { ColorScheme } from "../colorSchemes";
+import type { ColorSchemeId } from "../types";
 
 interface ToolbarProps {
   activeAction: string | null;
+  colorScheme: ColorSchemeId;
+  colorSchemes: readonly ColorScheme[];
   githubUrl: string;
-  theme: Theme;
   onCopyHtml: () => void;
   onCopyMarkdown: () => void;
   onExportPdf: () => void;
   onOpenHelp: () => void;
-  onToggleTheme: () => void;
+  onSelectColorScheme: (schemeId: ColorSchemeId) => void;
 }
 
 export function Toolbar({
   activeAction,
+  colorScheme,
+  colorSchemes,
   githubUrl,
-  theme,
   onCopyHtml,
   onCopyMarkdown,
   onExportPdf,
   onOpenHelp,
-  onToggleTheme
+  onSelectColorScheme
 }: ToolbarProps) {
+  const currentScheme = colorSchemes.find((scheme) => scheme.id === colorScheme) ?? colorSchemes[0];
+
   return (
     <div className="toolbar" role="toolbar" aria-label="Document actions">
       <button
@@ -73,26 +79,50 @@ export function Toolbar({
         className="icon-link"
         href={githubUrl}
         target="_blank"
-        rel="noreferrer"
+        rel="noopener noreferrer"
         title="Open GitHub repository"
         aria-label="Open GitHub repository"
       >
         <GitFork size={16} aria-hidden="true" />
       </a>
       <span className="toolbar-separator" aria-hidden="true" />
-      <button
-        type="button"
-        className={actionClass(activeAction, "theme")}
-        onClick={onToggleTheme}
-        title="Toggle Theme"
-        aria-label="Toggle Theme"
-      >
-        {theme === "light" ? <Moon size={16} aria-hidden="true" /> : <Sun size={16} aria-hidden="true" />}
-      </button>
+      <details className={`scheme-picker ${actionClass(activeAction, "scheme")}`} aria-label="Color scheme">
+        <summary role="button" aria-haspopup="menu" title={`Color scheme: ${currentScheme.name}`} aria-label="Color scheme">
+          <Palette size={16} aria-hidden="true" />
+          <span>{currentScheme.name}</span>
+          <ChevronDown size={14} aria-hidden="true" />
+        </summary>
+        <div className="scheme-menu" role="menu" aria-label="Color schemes">
+          {colorSchemes.map((scheme) => (
+            <button
+              key={scheme.id}
+              type="button"
+              role="menuitemradio"
+              aria-checked={scheme.id === colorScheme}
+              onClick={(event) => {
+                onSelectColorScheme(scheme.id);
+                closeSchemePicker(event.currentTarget);
+              }}
+            >
+              <span className="scheme-swatch" aria-hidden="true">
+                {scheme.swatches.map((swatch) => (
+                  <span key={swatch} style={{ background: swatch }} />
+                ))}
+              </span>
+              <span>{scheme.name}</span>
+              {scheme.id === colorScheme && <Check size={14} aria-hidden="true" />}
+            </button>
+          ))}
+        </div>
+      </details>
     </div>
   );
 }
 
 function actionClass(activeAction: string | null, actionId: string): string {
   return activeAction === actionId ? "is-action-complete" : "";
+}
+
+function closeSchemePicker(target: HTMLElement): void {
+  target.closest("details")?.removeAttribute("open");
 }

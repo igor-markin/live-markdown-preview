@@ -30,6 +30,29 @@ describe("sanitizeMarkdownHtml", () => {
     expect(safe).not.toContain("<button");
   });
 
+  it("removes unsafe link and image URLs after DOMPurify", () => {
+    const safe = sanitizeMarkdownHtml(
+      [
+        '<a href="data:text/html,<script>alert(1)</script>">data link</a>',
+        '<a href="blob:https://example.com/id">blob link</a>',
+        '<a href="file:///etc/passwd">file link</a>',
+        '<a href="mailto:test@example.com">mail</a>',
+        '<img src="data:image/svg+xml,<svg onload=alert(1)>">',
+        '<img src="data:image/png;base64,aGVsbG8=" srcset="https://tracker.example/pixel.png 1x">',
+        '<img src="https://tracker.example/pixel.png">'
+      ].join("")
+    );
+
+    expect(safe).toContain('<a>data link</a>');
+    expect(safe).toContain('<a>blob link</a>');
+    expect(safe).toContain('<a>file link</a>');
+    expect(safe).toContain('<a href="mailto:test@example.com" target="_blank" rel="noopener noreferrer">mail</a>');
+    expect(safe).toContain('<img src="data:image/png;base64,aGVsbG8=">');
+    expect(safe).not.toContain("data:image/svg+xml");
+    expect(safe).not.toContain("tracker.example");
+    expect(safe).not.toContain("srcset");
+  });
+
   it("copies sanitized preview HTML instead of raw worker HTML", () => {
     const preview = createPreviewHtmlState('<h1>Safe</h1><script>alert("bad")</script>');
     const copyable = getCopyableHtml(preview);

@@ -1,5 +1,26 @@
 export type Theme = "light" | "dark";
 
+export type ColorSchemeId =
+  | "ayu-dark"
+  | "catppuccin-mocha"
+  | "dracula"
+  | "everforest-dark"
+  | "github-dark"
+  | "github-light"
+  | "gruvbox-dark"
+  | "material-palenight"
+  | "monokai"
+  | "nord"
+  | "one-dark-pro"
+  | "rose-pine"
+  | "solarized-dark"
+  | "solarized-light"
+  | "synthwave-84"
+  | "tokyo-night"
+  | "kanagawa"
+  | "night-owl"
+  | "vs-code-dark-plus";
+
 export type ViewMode = "markdown" | "split" | "preview";
 
 export type SaveState = "loading" | "saved" | "saving" | "unavailable" | "conflict";
@@ -50,6 +71,7 @@ export type WorkerResponse = RenderedResponse | RenderErrorResponse;
 
 export interface Preferences {
   theme: Theme;
+  colorScheme: ColorSchemeId;
   outlineVisible: boolean;
   splitRatio: number;
 }

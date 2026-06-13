@@ -13,7 +13,7 @@ A fast local-first live preview tool for Markdown files.
 - Sanitized raw HTML preview and sanitized HTML copy.
 - Local draft and preferences stored in IndexedDB.
 - Outline, resizable editor/preview split, and persisted layout preferences.
-- Copy Markdown, copy sanitized HTML, browser print-based PDF export, theme toggle, and About dialog.
+- Copy Markdown, copy sanitized HTML, browser print-based PDF export, color scheme picker, and Help dialog.
 - Large document and large preview-output safeguards.
 
 ## Tech stack
@@ -36,7 +36,7 @@ The dev server binds to `127.0.0.1`.
 ## Scripts
 
 - `npm run dev` starts the Vite dev server.
-- `npm run preview` serves the production build with Vite preview.
+- `npm run preview` builds the app and serves it with Wrangler.
 - `npm run build` runs TypeScript checking and builds the app.
 - `npm test` runs the Vitest suite once.
 - `npm run test:watch` runs Vitest in watch mode.

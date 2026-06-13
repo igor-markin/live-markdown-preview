@@ -1,4 +1,5 @@
 import { defaultKeymap, history, historyKeymap, isolateHistory, redo, undo } from "@codemirror/commands";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorState, Transaction } from "@codemirror/state";
 import {
   drawSelection,
@@ -8,6 +9,7 @@ import {
   keymap,
   lineNumbers
 } from "@codemirror/view";
+import { tags } from "@lezer/highlight";
 import { useEffect, useRef, useState } from "preact/hooks";
 
 export interface MarkdownEditorHandle {
@@ -30,6 +32,20 @@ const GRAMMARLY_OPTOUT_ATTRIBUTES = {
   "data-gramm_editor": "false",
   spellcheck: "false"
 };
+const MARKDOWN_HIGHLIGHT_STYLE = HighlightStyle.define([
+  { tag: [tags.heading1, tags.heading2, tags.heading3, tags.heading4, tags.heading5, tags.heading6], color: "var(--syntax-heading)", fontWeight: "700" },
+  { tag: tags.link, color: "var(--syntax-link)", textDecoration: "underline" },
+  { tag: tags.url, color: "var(--syntax-link)" },
+  { tag: tags.monospace, color: "var(--syntax-code)" },
+  { tag: tags.quote, color: "var(--syntax-quote)", fontStyle: "italic" },
+  { tag: tags.emphasis, color: "var(--syntax-emphasis)", fontStyle: "italic" },
+  { tag: tags.strong, color: "var(--syntax-strong)", fontWeight: "700" },
+  { tag: tags.strikethrough, color: "var(--syntax-muted)", textDecoration: "line-through" },
+  { tag: tags.contentSeparator, color: "var(--syntax-muted)" },
+  { tag: [tags.processingInstruction, tags.meta, tags.punctuation], color: "var(--syntax-punctuation)" },
+  { tag: [tags.string, tags.attributeValue], color: "var(--syntax-string)" },
+  { tag: [tags.keyword, tags.atom], color: "var(--syntax-keyword)" }
+]);
 
 export function MarkdownEditor({ value, onChange, onEditorReady }: MarkdownEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -67,6 +83,7 @@ export function MarkdownEditor({ value, onChange, onEditorReady }: MarkdownEdito
             EditorView.contentAttributes.of(GRAMMARLY_OPTOUT_ATTRIBUTES),
             EditorView.editorAttributes.of(GRAMMARLY_OPTOUT_ATTRIBUTES),
             markdown(),
+            syntaxHighlighting(MARKDOWN_HIGHLIGHT_STYLE),
             EditorView.lineWrapping,
             highlightActiveLine(),
             keymap.of([{ key: "Ctrl-z", run: undo }, ...defaultKeymap, ...historyKeymap]),
