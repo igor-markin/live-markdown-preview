@@ -2,6 +2,8 @@
 
 [Live demo](https://live-markdown-preview.igor-markin.workers.dev/)
 
+<a href="https://www.producthunt.com/products/live-markdown-preview?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-live-markdown-preview" target="_blank" rel="noopener noreferrer"><img alt="Live Markdown Preview - Local-first Markdown editor with safe live preview | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1170779&amp;theme=light&amp;t=1781435013848"></a>
+
 ![Live Markdown Preview marketing hero](docs/assets/marketing-hero.webp)
 
 A frontend-only, local-first Markdown editor and live preview app. Drafts stay in the browser, render in a Web Worker, and can be copied as Markdown or sanitized HTML.
