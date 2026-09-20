@@ -2,7 +2,7 @@
 
 **A little space for your ideas.** Write Markdown, watch it take shape, and keep your drafts in your browser.
 
-[Open the editor →](https://live-markdown-preview.igor-markin.workers.dev/) · No account required
+[Open the editor](https://live-markdown-preview.igor-markin.workers.dev/)
 
 ![A welcoming Markdown workspace in GitHub Light, with a document outline, editable source, and a live preview of a checklist and weekly plan.](docs/assets/screenshots/workspace-light.png)
 
