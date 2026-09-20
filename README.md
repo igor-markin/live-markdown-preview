@@ -1,12 +1,16 @@
 # Live Markdown Preview
 
-[Live demo](https://live-markdown-preview.igor-markin.workers.dev/)
+**A little space for your ideas.** Write Markdown, watch it take shape, and keep your drafts in your browser.
 
-<a href="https://www.producthunt.com/products/live-markdown-preview?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-live-markdown-preview" target="_blank" rel="noopener noreferrer"><img alt="Live Markdown Preview - Local-first Markdown editor with safe live preview | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1170779&amp;theme=light&amp;t=1781435013848"></a>
+[Open the editor →](https://live-markdown-preview.igor-markin.workers.dev/) · No account required
 
-![Live Markdown Preview marketing hero](docs/assets/marketing-hero.webp)
+![A welcoming Markdown workspace in GitHub Light, with a document outline, editable source, and a live preview of a checklist and weekly plan.](docs/assets/screenshots/workspace-light.png)
+
+*A first draft, a weekly plan, or a page worth sharing — source and preview, side by side.*
 
 **Private Markdown workspace. Write locally, preview instantly, and copy clean HTML.** No account is required and document content is never sent to an application server. Keep several browser drafts, open or download `.md` files, and move from source to a reusable result without leaving the page.
+
+<a href="https://www.producthunt.com/products/live-markdown-preview?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-live-markdown-preview" target="_blank" rel="noopener noreferrer"><img alt="Live Markdown Preview - Local-first Markdown editor with safe live preview | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1170779&amp;theme=light&amp;t=1781435013848"></a>
 
 ## Features
 
@@ -31,6 +35,10 @@
 ## Color schemes
 
 The editor includes 19 persisted color schemes. `GitHub Light` is the default light scheme, and `VS Code Dark+` is the default dark scheme.
+
+![The same Markdown workspace in Catppuccin Mocha, with soft lavender accents and a dark editor and preview.](docs/assets/screenshots/workspace-dark.png)
+
+*Make yourself at home. Switch to Catppuccin Mocha for a softer dark workspace, or choose another palette below.*
 
 Available schemes: GitHub Light, GitHub Dark, Solarized Light, VS Code Dark+, One Dark Pro, Dracula, Catppuccin Mocha, Tokyo Night, Night Owl, Monokai, SynthWave '84, Material Palenight, Kanagawa, Rose Pine, Ayu Dark, Gruvbox Dark, Everforest Dark, Solarized Dark, and Nord.
 
