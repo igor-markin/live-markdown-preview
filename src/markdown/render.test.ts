@@ -38,6 +38,29 @@ describe("renderMarkdown", () => {
     ]);
   });
 
+  it("keeps heading ids unique when natural numeric suffixes collide", async () => {
+    const result = await renderMarkdown(`# A
+
+## A
+
+### A-2
+
+#### A
+`);
+
+    expect(result.headings.map((heading) => heading.id)).toEqual(["a", "a-2", "a-2-2", "a-3"]);
+    expect(new Set(result.headings.map((heading) => heading.id)).size).toBe(4);
+  });
+
+  it("normalizes canonically equivalent Unicode headings consistently", async () => {
+    const result = await renderMarkdown(`# Caf\u00e9
+
+## Cafe\u0301
+`);
+
+    expect(result.headings.map((heading) => heading.id)).toEqual(["cafe", "cafe-2"]);
+  });
+
   it("caps outline headings and reports a diagnostic", async () => {
     const markdown = Array.from({ length: MAX_OUTLINE_HEADINGS + 2 }, (_, index) => `# Heading ${index + 1}`).join("\n");
     const result = await renderMarkdown(markdown);

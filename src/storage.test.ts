@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_MARKDOWN } from "./defaults";
-import { createAppStorage, DraftConflictError, StorageUnavailableError } from "./storage";
+import { createAppStorage, DraftConflictError, runStoreTransaction, StorageUnavailableError } from "./storage";
 
 function deleteDatabase(name: string): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -221,6 +221,60 @@ describe("createAppStorage", () => {
     });
   });
 
+  it("aborts a store transaction when its timeout expires", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const transaction = createControlledTransaction();
+      transaction.abort.mockImplementation(() => {
+        transaction.onabort?.();
+      });
+      const promise = runStoreTransaction<void>(
+        createControlledDatabase(transaction),
+        "readwrite",
+        10,
+        "test write",
+        () => undefined
+      );
+      const rejection = expect(promise).rejects.toMatchObject({
+        name: "StorageUnavailableError",
+        reason: "timeout"
+      });
+
+      await vi.advanceTimersByTimeAsync(10);
+      await rejection;
+      expect(transaction.abort).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses a completed transaction as the authoritative result when timeout races with commit", async () => {
+    vi.useFakeTimers();
+
+    try {
+      const transaction = createControlledTransaction();
+      transaction.abort.mockImplementation(() => {
+        throw new DOMException("Transaction already committed", "InvalidStateError");
+      });
+      const promise = runStoreTransaction<string>(
+        createControlledDatabase(transaction),
+        "readwrite",
+        10,
+        "test write",
+        (_store, setResult) => setResult("committed")
+      );
+
+      await vi.advanceTimersByTimeAsync(10);
+      expect(transaction.abort).toHaveBeenCalledOnce();
+      transaction.oncomplete?.();
+
+      await expect(promise).resolves.toBe("committed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("caps the technical error log without storing markdown content", async () => {
     const storage = createAppStorage(indexedDB);
     const secretMarkdown = "# Secret Markdown\n\nDo not log this";
@@ -242,6 +296,32 @@ describe("createAppStorage", () => {
     expect(JSON.stringify(log)).not.toContain(secretMarkdown);
   });
 });
+
+interface ControlledTransaction {
+  abort: ReturnType<typeof vi.fn>;
+  objectStore: () => IDBObjectStore;
+  error: DOMException | null;
+  oncomplete: (() => void) | null;
+  onerror: (() => void) | null;
+  onabort: (() => void) | null;
+}
+
+function createControlledTransaction(): ControlledTransaction {
+  return {
+    abort: vi.fn(),
+    objectStore: () => ({}) as IDBObjectStore,
+    error: null,
+    oncomplete: null,
+    onerror: null,
+    onabort: null
+  };
+}
+
+function createControlledDatabase(transaction: ControlledTransaction): IDBDatabase {
+  return {
+    transaction: () => transaction as unknown as IDBTransaction
+  } as unknown as IDBDatabase;
+}
 
 async function seedPreferences(value: unknown): Promise<void> {
   await seedValue("preferences", value);

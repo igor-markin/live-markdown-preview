@@ -21,6 +21,7 @@ export function useMarkdownRender(
 ): MarkdownRenderResult {
   const workerRef = useRef<MarkdownWorkerClient | null>(null);
   const lastRenderedMarkdownRef = useRef<string | null>(null);
+  const renderGenerationRef = useRef(0);
 
   const [previewHtml, setPreviewHtml] = useState<PreviewHtmlState>(() => createPreviewHtmlState(""));
   const [headings, setHeadings] = useState<HeadingItem[]>([]);
@@ -40,6 +41,9 @@ export function useMarkdownRender(
   }, []);
 
   useEffect(() => {
+    const renderGeneration = renderGenerationRef.current + 1;
+    renderGenerationRef.current = renderGeneration;
+
     if (shouldPauseLiveRender(markdown)) {
       lastRenderedMarkdownRef.current = null;
       setPreviewHtml(createPreviewHtmlState(createPreviewMessageHtml(LARGE_DOCUMENT_STATUS)));
@@ -72,6 +76,10 @@ export function useMarkdownRender(
 
       worker.render(markdown, {
         onRendered: (result) => {
+          if (renderGeneration !== renderGenerationRef.current) {
+            return;
+          }
+
           if (shouldPausePreviewHtml(result.html)) {
             lastRenderedMarkdownRef.current = null;
             setPreviewHtml(createPreviewHtmlState(createPreviewMessageHtml(LARGE_PREVIEW_STATUS)));
@@ -94,6 +102,10 @@ export function useMarkdownRender(
           setRenderState("ready");
         },
         onError: (error) => {
+          if (renderGeneration !== renderGenerationRef.current) {
+            return;
+          }
+
           const message = error === "Render timed out" || error === "Render unavailable" ? error : "Render error";
 
           lastRenderedMarkdownRef.current = null;

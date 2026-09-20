@@ -760,7 +760,7 @@ async function appendErrorLogValue(
   }
 }
 
-function runStoreTransaction<T>(
+export function runStoreTransaction<T>(
   database: IDBDatabase,
   mode: IDBTransactionMode,
   timeoutMs: number,
@@ -772,12 +772,20 @@ function runStoreTransaction<T>(
     transaction: IDBTransaction
   ) => void
 ): Promise<T> {
-  return withStorageTimeout(
-    new Promise<T>((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
       let transaction: IDBTransaction;
       let result: T | undefined;
       let settled = false;
       let hasResult = false;
+      let timedOut = false;
+      let timeout: number | null = null;
+
+      const clearTransactionTimeout = () => {
+        if (timeout !== null) {
+          window.clearTimeout(timeout);
+          timeout = null;
+        }
+      };
 
       const setResult = (nextResult: T) => {
         result = nextResult;
@@ -787,6 +795,7 @@ function runStoreTransaction<T>(
       const rejectOnce = (error: unknown) => {
         if (!settled) {
           settled = true;
+          clearTransactionTimeout();
           reject(error);
         }
       };
@@ -797,6 +806,21 @@ function runStoreTransaction<T>(
         rejectOnce(toStorageError(error));
         return;
       }
+
+      timeout = window.setTimeout(() => {
+        if (settled) {
+          return;
+        }
+
+        timedOut = true;
+
+        try {
+          transaction.abort();
+        } catch {
+          // The transaction may already have committed. Its completion event is
+          // authoritative, so do not report a timeout with an ambiguous outcome.
+        }
+      }, timeoutMs);
 
       try {
         start(transaction.objectStore(STORE_NAME), setResult, rejectOnce, transaction);
@@ -812,38 +836,30 @@ function runStoreTransaction<T>(
       transaction.oncomplete = () => {
         if (!settled) {
           settled = true;
+          clearTransactionTimeout();
           resolve(result as T);
         }
       };
 
       transaction.onerror = () => {
+        if (timedOut) {
+          return;
+        }
+
         rejectOnce(toStorageError(transaction.error));
       };
 
       transaction.onabort = () => {
-        rejectOnce(toStorageError(transaction.error));
+        rejectOnce(
+          timedOut
+            ? new StorageUnavailableError(`${operation} timed out and was aborted.`, "timeout")
+            : toStorageError(transaction.error)
+        );
       };
 
       if (mode === "readonly" && !hasResult) {
         // Read transactions set their result from request callbacks.
       }
-    }),
-    timeoutMs,
-    operation
-  );
-}
-
-function withStorageTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
-      reject(new StorageUnavailableError(`${operation} timed out.`, "timeout"));
-    }, timeoutMs);
-
-    promise
-      .then(resolve, reject)
-      .finally(() => {
-        window.clearTimeout(timeout);
-      });
   });
 }
 

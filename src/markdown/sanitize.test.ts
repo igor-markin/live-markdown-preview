@@ -39,7 +39,8 @@ describe("sanitizeMarkdownHtml", () => {
         '<a href="mailto:test@example.com">mail</a>',
         '<img src="data:image/svg+xml,<svg onload=alert(1)>">',
         '<img src="data:image/png;base64,aGVsbG8=" srcset="https://tracker.example/pixel.png 1x">',
-        '<img src="https://tracker.example/pixel.png">'
+        '<img src="https://tracker.example/pixel.png">',
+        '<img src="/\\\\tracker.example/pixel.png">'
       ].join("")
     );
 

@@ -115,6 +115,7 @@ function getNodeText(node: MarkdownNode): string {
 
 function createSlugger(): (text: string) => string {
   const counts = new Map<string, number>();
+  const usedIds = new Set<string>();
 
   return (text: string) => {
     const base =
@@ -125,9 +126,17 @@ function createSlugger(): (text: string) => string {
         .trim()
         .replace(/\s+/g, "-") || "heading";
 
-    const count = counts.get(base) ?? 0;
-    counts.set(base, count + 1);
+    let count = counts.get(base) ?? 0;
+    let id = count === 0 ? base : `${base}-${count + 1}`;
 
-    return count === 0 ? base : `${base}-${count + 1}`;
+    while (usedIds.has(id)) {
+      count += 1;
+      id = `${base}-${count + 1}`;
+    }
+
+    counts.set(base, count + 1);
+    usedIds.add(id);
+
+    return id;
   };
 }

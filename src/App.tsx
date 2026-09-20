@@ -2,23 +2,28 @@ import type { JSX } from "preact";
 import {
   Check,
   Columns2,
+  Download,
   Eye,
   FileText,
   PanelLeft,
   PanelLeftClose,
+  Pencil,
   Plus,
   Redo2,
   Trash2,
   Undo2,
+  Upload,
   X
 } from "lucide-preact";
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { settleAutosaveConflict, takePendingSave, type PendingSave } from "./autosaveQueue";
 import type { MarkdownEditorHandle } from "./components/MarkdownEditor";
 import { StatusBar } from "./components/StatusBar";
 import { Toolbar } from "./components/Toolbar";
 import { COLOR_SCHEMES, getColorScheme } from "./colorSchemes";
 import { copyTextToClipboard } from "./clipboard";
 import { DEFAULT_MARKDOWN, DEFAULT_PREFERENCES } from "./defaults";
+import { DocumentSessionRegistry } from "./documentSessions";
 import { useMarkdownRender } from "./hooks/useMarkdownRender";
 import { getCopyableHtml } from "./markdown/previewHtml";
 import { clampSplitRatio } from "./preferences";
@@ -33,21 +38,21 @@ import type { ColorSchemeId, Preferences, SaveState, Theme, ViewMode } from "./t
 
 type ConflictAction = null | "reload";
 type MarkdownEditorComponent = typeof import("./components/MarkdownEditor").MarkdownEditor;
-type PendingSave = {
-  fileId: string;
-  markdown: string;
-  expectedRevision: number;
-};
 type EmergencyDraftBackup = {
-  version: 1;
+  version: 3;
+  drafts: EmergencyDraftEntry[];
+};
+type EmergencyDraftEntry = {
   fileId: string;
   markdown: string;
   expectedRevision: number;
   updatedAt: number;
+  state: "pending" | "conflict";
 };
 
 const ACTION_FEEDBACK_MS = 650;
 const AUTOSAVE_DELAY_MS = 300;
+const PREFERENCES_SAVE_DELAY_MS = 250;
 const SPLIT_INDICATOR_MS = 900;
 const GITHUB_URL = "https://github.com/igor-markin/live-markdown-preview";
 const DRAFT_CHANNEL_NAME = "live-markdown-preview:draft";
@@ -55,14 +60,19 @@ const EMERGENCY_DRAFT_BACKUP_KEY = "live-markdown-preview:emergency-draft";
 
 export function App() {
   const storageRef = useRef(createAppStorage());
+  const documentSessionsRef = useRef(new DocumentSessionRegistry());
   const loadedRef = useRef(false);
   const editorHandleRef = useRef<MarkdownEditorHandle | null>(null);
   const actionFeedbackTimeoutRef = useRef<number | null>(null);
   const autosaveTimeoutRef = useRef<number | null>(null);
+  const preferencesSaveTimeoutRef = useRef<number | null>(null);
   const splitIndicatorTimeoutRef = useRef<number | null>(null);
   const workspaceRef = useRef<HTMLElement | null>(null);
   const helpDialogRef = useRef<HTMLDialogElement | null>(null);
   const helpCloseButtonRef = useRef<HTMLButtonElement | null>(null);
+  const sidebarToggleButtonRef = useRef<HTMLButtonElement | null>(null);
+  const mobileSidebarCloseRef = useRef<HTMLButtonElement | null>(null);
+  const markdownFileInputRef = useRef<HTMLInputElement | null>(null);
   const clientIdRef = useRef(createClientId());
   const currentFileRevisionRef = useRef(0);
   const fileRevisionsRef = useRef<Map<string, number>>(new Map());
@@ -74,6 +84,7 @@ export function App() {
   const broadcastRef = useRef<BroadcastChannel | null>(null);
   const pendingSavesRef = useRef<Map<string, PendingSave>>(new Map());
   const inFlightSaveRef = useRef<PendingSave | null>(null);
+  const fileSwitchGenerationRef = useRef(0);
   const flushPendingSaveRef = useRef<() => void>(() => undefined);
 
   const [markdown, setMarkdown] = useState(DEFAULT_MARKDOWN);
@@ -84,6 +95,7 @@ export function App() {
   const [splitRatio, setSplitRatio] = useState(DEFAULT_PREFERENCES.splitRatio);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [mobileFilesOpen, setMobileFilesOpen] = useState(false);
   const [files, setFiles] = useState<FileRecord[]>([]);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
   const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
@@ -98,6 +110,7 @@ export function App() {
   const [splitIndicatorVisible, setSplitIndicatorVisible] = useState(false);
 
   const effectiveViewMode = isMobileViewport && viewMode === "split" ? "markdown" : viewMode;
+  const sidebarVisible = isMobileViewport ? mobileFilesOpen : outlineVisible;
   const wordCount = useMemo(() => countWords(markdown), [markdown]);
 
   const completeAction = useCallback((actionId: string, message: string) => {
@@ -162,31 +175,51 @@ export function App() {
     });
   }, []);
 
+  const setDocumentSaveState = useCallback((fileId: string, nextSaveState: SaveState) => {
+    documentSessionsRef.current.setSaveState(fileId, nextSaveState);
+
+    if (activeFileIdRef.current === fileId) {
+      saveStateRef.current = nextSaveState;
+      setSaveState(nextSaveState);
+    }
+  }, []);
+
   const applyActiveFile = useCallback(
     (record: FileRecord) => {
+      const session = documentSessionsRef.current.open(record);
+
       activeFileIdRef.current = record.id;
-      currentFileRevisionRef.current = record.revision;
-      fileRevisionsRef.current.set(record.id, record.revision);
-      remoteFileRef.current = null;
+      currentFileRevisionRef.current = session.savedRevision;
+      fileRevisionsRef.current.set(record.id, session.savedRevision);
+      remoteFileRef.current = session.remoteFile;
       storageWritePausedRef.current = false;
-      markdownRef.current = record.markdown;
-      clearEmergencyDraftBackup(record.id);
+      markdownRef.current = session.workingMarkdown;
+
+      if (!session.dirty) {
+        clearEmergencyDraftBackup(record.id);
+      }
 
       setActiveFileId(record.id);
+      setMobileFilesOpen(false);
       setPendingConflictAction(null);
-      setMarkdown(record.markdown);
-      setSaveState("saved");
+      setMarkdown(session.workingMarkdown);
+      saveStateRef.current = session.saveState;
+      setSaveState(session.saveState);
       upsertFile(record);
     },
     [upsertFile]
   );
 
   const flushPendingSave = useCallback(() => {
-    if (inFlightSaveRef.current || storageWritePausedRef.current || saveStateRef.current === "conflict") {
+    if (inFlightSaveRef.current || storageWritePausedRef.current) {
       return;
     }
 
-    const pendingSave = takePendingSave(pendingSavesRef.current, activeFileIdRef.current);
+    const pendingSave = takePendingSave(
+      pendingSavesRef.current,
+      activeFileIdRef.current,
+      (fileId) => documentSessionsRef.current.get(fileId)?.saveState !== "conflict"
+    );
 
     if (!pendingSave) {
       return;
@@ -209,6 +242,7 @@ export function App() {
         }
 
         fileRevisionsRef.current.set(record.id, record.revision);
+        const session = documentSessionsRef.current.markSaved(record);
         upsertFile(record);
         broadcastFile(record, broadcastRef.current);
 
@@ -222,14 +256,14 @@ export function App() {
         }
 
         if (activeFileIdRef.current === record.id) {
-          currentFileRevisionRef.current = record.revision;
+          currentFileRevisionRef.current = session.savedRevision;
 
-          if (markdownRef.current === record.markdown && !pendingSavesRef.current.has(record.id)) {
+          if (!session.dirty && !pendingSavesRef.current.has(record.id)) {
             clearEmergencyDraftBackup(record.id);
             setPendingConflictAction(null);
-            setSaveState("saved");
+            setDocumentSaveState(record.id, "saved");
           } else {
-            setSaveState("saving");
+            setDocumentSaveState(record.id, "saving");
           }
         }
 
@@ -246,54 +280,57 @@ export function App() {
 
         if (error instanceof DraftConflictError) {
           const storedRecord = error.storedRecord;
+          const conflictResult = settleAutosaveConflict(
+            pendingSavesRef.current,
+            documentSessionsRef.current,
+            failedSave,
+            storedRecord
+          );
 
           if (storedRecord) {
             fileRevisionsRef.current.set(storedRecord.id, storedRecord.revision);
             upsertFile(storedRecord);
-
-            const queuedSave = pendingSavesRef.current.get(storedRecord.id);
-
-            if (queuedSave) {
-              pendingSavesRef.current.set(storedRecord.id, {
-                ...queuedSave,
-                expectedRevision: storedRecord.revision
-              });
-            }
           }
 
-          if (activeFileIdRef.current !== failedSave.fileId) {
-            flushPendingSaveRef.current();
-            return;
-          }
-
-          if (storedRecord?.markdown === markdownRef.current) {
-            currentFileRevisionRef.current = storedRecord.revision;
-            remoteFileRef.current = null;
+          if (storedRecord && conflictResult.outcome === "saved" && conflictResult.session) {
+            const savedSession = conflictResult.session;
             clearEmergencyDraftBackup(storedRecord.id);
-            setPendingConflictAction(null);
-            setSaveState("saved");
+
+            if (activeFileIdRef.current === failedSave.fileId) {
+              currentFileRevisionRef.current = savedSession.savedRevision;
+              remoteFileRef.current = null;
+              setPendingConflictAction(null);
+              setDocumentSaveState(storedRecord.id, "saved");
+            }
+
             flushPendingSaveRef.current();
             return;
           }
 
-          remoteFileRef.current = storedRecord;
-          setPendingConflictAction(null);
-          setSaveState("conflict");
-          completeAction("conflict", "Draft changed in another tab");
+          if (activeFileIdRef.current === failedSave.fileId) {
+            remoteFileRef.current = storedRecord;
+            setPendingConflictAction(null);
+            setDocumentSaveState(failedSave.fileId, "conflict");
+            completeAction("conflict", "Draft changed in another tab");
+          }
+
+          flushPendingSaveRef.current();
           return;
         }
 
         captureStorageError(error, "autosave");
         storageWritePausedRef.current = true;
         pendingSavesRef.current.clear();
-        setSaveState("unavailable");
+        setDocumentSaveState(failedSave.fileId, "unavailable");
       });
-  }, [captureStorageError, completeAction, upsertFile]);
+  }, [captureStorageError, completeAction, setDocumentSaveState, upsertFile]);
 
   flushPendingSaveRef.current = flushPendingSave;
 
   const scheduleAutosave = useCallback((fileId: string, nextMarkdown: string) => {
-    if (!loadedRef.current || storageWritePausedRef.current || saveStateRef.current === "conflict") {
+    const session = documentSessionsRef.current.get(fileId);
+
+    if (!loadedRef.current || storageWritePausedRef.current || session?.saveState === "conflict") {
       return;
     }
 
@@ -304,7 +341,7 @@ export function App() {
       markdown: nextMarkdown,
       expectedRevision
     });
-    setSaveState("saving");
+    setDocumentSaveState(fileId, "saving");
 
     if (autosaveTimeoutRef.current !== null) {
       window.clearTimeout(autosaveTimeoutRef.current);
@@ -314,7 +351,7 @@ export function App() {
       autosaveTimeoutRef.current = null;
       flushPendingSaveRef.current();
     }, AUTOSAVE_DELAY_MS);
-  }, []);
+  }, [setDocumentSaveState]);
 
   const queueCurrentFileSave = useCallback(() => {
     const currentFileId = activeFileIdRef.current;
@@ -340,6 +377,7 @@ export function App() {
       const currentFileId = activeFileIdRef.current;
 
       if (currentFileId) {
+        documentSessionsRef.current.updateWorkingCopy(currentFileId, nextMarkdown);
         scheduleAutosave(currentFileId, nextMarkdown);
       }
     },
@@ -361,23 +399,27 @@ export function App() {
 
   useEffect(() => {
     const persistEmergencyDraft = () => {
-      const fileId = activeFileIdRef.current;
-
-      if (!loadedRef.current || !fileId) {
+      if (!loadedRef.current) {
         return;
       }
 
-      if (!hasUnsavedDraftForFile(fileId, saveStateRef.current, pendingSavesRef.current, inFlightSaveRef.current)) {
-        clearEmergencyDraftBackup(fileId);
+      const updatedAt = Date.now();
+      const drafts = documentSessionsRef.current.unsaved().map((session) => ({
+        fileId: session.fileId,
+        markdown: session.workingMarkdown,
+        expectedRevision: session.savedRevision,
+        updatedAt,
+        state: session.saveState === "conflict" ? ("conflict" as const) : ("pending" as const)
+      }));
+
+      if (drafts.length === 0) {
+        clearEmergencyDraftBackup();
         return;
       }
 
       writeEmergencyDraftBackup({
-        version: 1,
-        fileId,
-        markdown: markdownRef.current,
-        expectedRevision: fileRevisionsRef.current.get(fileId) ?? currentFileRevisionRef.current,
-        updatedAt: Date.now()
+        version: 3,
+        drafts
       });
     };
     const handleVisibilityChange = () => {
@@ -403,6 +445,10 @@ export function App() {
 
       if (splitIndicatorTimeoutRef.current !== null) {
         window.clearTimeout(splitIndicatorTimeoutRef.current);
+      }
+
+      if (preferencesSaveTimeoutRef.current !== null) {
+        window.clearTimeout(preferencesSaveTimeoutRef.current);
       }
     };
   }, []);
@@ -484,21 +530,40 @@ export function App() {
 
       upsertFile(record);
 
+      const session = documentSessionsRef.current.get(record.id);
+      const knownRevision = session?.savedRevision ?? fileRevisionsRef.current.get(record.id) ?? 0;
+
+      if (record.revision <= knownRevision) {
+        return;
+      }
+
+      if (session && session.workingMarkdown !== record.markdown) {
+        documentSessionsRef.current.markConflict(record.id, record);
+
+        if (record.id !== activeFileIdRef.current) {
+          return;
+        }
+      } else if (session) {
+        documentSessionsRef.current.markSaved(record);
+      }
+
       if (record.id !== activeFileIdRef.current || record.revision <= currentFileRevisionRef.current) {
         return;
       }
 
       if (record.markdown === markdownRef.current) {
-        currentFileRevisionRef.current = record.revision;
-        fileRevisionsRef.current.set(record.id, record.revision);
+        const savedSession = documentSessionsRef.current.markSaved(record);
+        currentFileRevisionRef.current = savedSession.savedRevision;
+        fileRevisionsRef.current.set(record.id, savedSession.savedRevision);
         setPendingConflictAction(null);
-        setSaveState("saved");
+        setDocumentSaveState(record.id, "saved");
         return;
       }
 
       remoteFileRef.current = record;
+      documentSessionsRef.current.markConflict(record.id, record);
       setPendingConflictAction(null);
-      setSaveState("conflict");
+      setDocumentSaveState(record.id, "conflict");
       completeAction("conflict", "Draft changed in another tab");
     };
 
@@ -506,7 +571,7 @@ export function App() {
       channel.close();
       broadcastRef.current = null;
     };
-  }, [completeAction, upsertFile]);
+  }, [completeAction, setDocumentSaveState, upsertFile]);
 
   const closeHelp = useCallback(() => {
     setIsHelpOpen(false);
@@ -548,6 +613,12 @@ export function App() {
   }, [closeHelp, isHelpOpen]);
 
   useEffect(() => {
+    if (isMobileViewport && mobileFilesOpen) {
+      mobileSidebarCloseRef.current?.focus();
+    }
+  }, [isMobileViewport, mobileFilesOpen]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadStoredState() {
@@ -561,42 +632,51 @@ export function App() {
           return;
         }
 
+        documentSessionsRef.current.seed(storedWorkspace.files);
         fileRevisionsRef.current = new Map(storedWorkspace.files.map((file) => [file.id, file.revision]));
         activeFileIdRef.current = storedWorkspace.activeFileId;
-        currentFileRevisionRef.current = storedWorkspace.activeFile.revision;
         const emergencyBackup = readEmergencyDraftBackup();
-        const restoredFromEmergencyBackup = shouldRestoreEmergencyDraft(emergencyBackup, storedWorkspace.activeFile);
-        const activeFile = restoredFromEmergencyBackup
-          ? {
-              ...storedWorkspace.activeFile,
-              markdown: emergencyBackup.markdown
-            }
-          : storedWorkspace.activeFile;
-        const workspaceFiles = storedWorkspace.files.map((file) => (file.id === activeFile.id ? activeFile : file));
+        const restoredDrafts = emergencyBackup?.drafts.filter((draft) => {
+          const storedFile = storedWorkspace.files.find((file) => file.id === draft.fileId);
 
-        markdownRef.current = activeFile.markdown;
+          if (!storedFile || !shouldRestoreEmergencyDraft(draft, storedFile)) {
+            return false;
+          }
 
-        setFiles(workspaceFiles);
+          documentSessionsRef.current.restore(storedFile, draft);
+
+          if (draft.state === "pending") {
+            pendingSavesRef.current.set(storedFile.id, {
+              fileId: storedFile.id,
+              markdown: draft.markdown,
+              expectedRevision: draft.expectedRevision
+            });
+          }
+          return true;
+        }) ?? [];
+        const activeSession = documentSessionsRef.current.open(storedWorkspace.activeFile);
+
+        currentFileRevisionRef.current = activeSession.savedRevision;
+        remoteFileRef.current = activeSession.remoteFile;
+        markdownRef.current = activeSession.workingMarkdown;
+
+        setFiles(storedWorkspace.files);
         setActiveFileId(storedWorkspace.activeFileId);
-        setMarkdown(activeFile.markdown);
+        setMarkdown(activeSession.workingMarkdown);
         setTheme(storedPreferences.theme);
         setColorScheme(storedPreferences.colorScheme);
         setOutlineVisible(storedPreferences.outlineVisible);
         setSplitRatio(storedPreferences.splitRatio);
-        setSaveState(restoredFromEmergencyBackup ? "saving" : "saved");
+        saveStateRef.current = activeSession.saveState;
+        setSaveState(activeSession.saveState);
 
-        if (restoredFromEmergencyBackup) {
-          pendingSavesRef.current.set(activeFile.id, {
-            fileId: activeFile.id,
-            markdown: activeFile.markdown,
-            expectedRevision: emergencyBackup.expectedRevision
-          });
-          completeAction("storage", "Unsaved draft restored");
+        if (restoredDrafts.length > 0) {
+          completeAction("storage", restoredDrafts.length === 1 ? "Unsaved draft restored" : `${restoredDrafts.length} drafts restored`);
           window.setTimeout(() => {
             flushPendingSaveRef.current();
           }, 0);
         } else {
-          clearEmergencyDraftBackup(storedWorkspace.activeFile.id);
+          clearEmergencyDraftBackup();
         }
       } catch (error) {
         if (!cancelled) {
@@ -627,12 +707,31 @@ export function App() {
     }
 
     const preferences: Preferences = { theme, colorScheme, outlineVisible, splitRatio };
-    void storageRef.current.savePreferences(preferences).catch((error: unknown) => {
-      captureStorageError(error, "save preferences");
-      storageWritePausedRef.current = true;
-      setSaveState("unavailable");
-    });
-  }, [captureStorageError, colorScheme, outlineVisible, splitRatio, theme]);
+
+    if (preferencesSaveTimeoutRef.current !== null) {
+      window.clearTimeout(preferencesSaveTimeoutRef.current);
+    }
+
+    preferencesSaveTimeoutRef.current = window.setTimeout(() => {
+      preferencesSaveTimeoutRef.current = null;
+      void storageRef.current.savePreferences(preferences).catch((error: unknown) => {
+        captureStorageError(error, "save preferences");
+        storageWritePausedRef.current = true;
+
+        const currentFileId = activeFileIdRef.current;
+        if (currentFileId) {
+          setDocumentSaveState(currentFileId, "unavailable");
+        }
+      });
+    }, PREFERENCES_SAVE_DELAY_MS);
+
+    return () => {
+      if (preferencesSaveTimeoutRef.current !== null) {
+        window.clearTimeout(preferencesSaveTimeoutRef.current);
+        preferencesSaveTimeoutRef.current = null;
+      }
+    };
+  }, [captureStorageError, colorScheme, outlineVisible, setDocumentSaveState, splitRatio, theme]);
 
   const copyMarkdown = useCallback(async () => {
     await runClipboardAction(
@@ -704,6 +803,51 @@ export function App() {
     }
   }, [completeAction, isPreviewFresh]);
 
+  const downloadMarkdown = useCallback(() => {
+    const activeFile = files.find((file) => file.id === activeFileIdRef.current);
+    const filename = `${sanitizeFilename(activeFile?.title ?? "document")}.md`;
+    const url = URL.createObjectURL(new Blob([markdownRef.current], { type: "text/markdown;charset=utf-8" }));
+    const anchor = document.createElement("a");
+
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    completeAction("download", "Markdown downloaded");
+  }, [completeAction, files]);
+
+  const openMarkdownFilePicker = useCallback(() => {
+    markdownFileInputRef.current?.click();
+  }, []);
+
+  const importMarkdownFile = useCallback(
+    async (event: JSX.TargetedEvent<HTMLInputElement, Event>) => {
+      const input = event.currentTarget;
+      const file = input.files?.[0];
+
+      if (!file) {
+        return;
+      }
+
+      try {
+        const importedMarkdown = await file.text();
+        queueCurrentFileSave();
+        const title = file.name.replace(/\.md(?:own)?$/i, "").trim() || "Imported document";
+        const record = await storageRef.current.createFile(importedMarkdown, title);
+
+        documentSessionsRef.current.seed([record]);
+        applyActiveFile(record);
+        completeAction("import", "Markdown file opened");
+      } catch (error) {
+        captureStorageError(error, "import Markdown file");
+        completeAction("import", "File could not be opened");
+      } finally {
+        input.value = "";
+      }
+    },
+    [applyActiveFile, captureStorageError, completeAction, queueCurrentFileSave]
+  );
+
   const switchActiveFile = useCallback(
     async (fileId: string) => {
       if (!fileId || fileId === activeFileIdRef.current) {
@@ -712,9 +856,15 @@ export function App() {
 
       queueCurrentFileSave();
       setSaveState("loading");
+      const switchGeneration = fileSwitchGenerationRef.current + 1;
+      fileSwitchGenerationRef.current = switchGeneration;
 
       try {
         const record = await storageRef.current.setActiveFile(fileId);
+
+        if (switchGeneration !== fileSwitchGenerationRef.current) {
+          return;
+        }
 
         applyActiveFile(record);
         completeAction("file", "File opened");
@@ -730,10 +880,12 @@ export function App() {
   const createNewFile = useCallback(async () => {
     queueCurrentFileSave();
     setSaveState("loading");
+    fileSwitchGenerationRef.current += 1;
 
     try {
       const record = await storageRef.current.createFile(DEFAULT_MARKDOWN, `New file ${files.length + 1}`);
 
+      documentSessionsRef.current.seed([record]);
       applyActiveFile(record);
       completeAction("file", "New file created");
     } catch (error) {
@@ -745,6 +897,13 @@ export function App() {
 
   const deleteFile = useCallback(
     async (fileId: string) => {
+      const file = files.find((candidate) => candidate.id === fileId);
+      const workingMarkdown = documentSessionsRef.current.get(fileId)?.workingMarkdown ?? file?.markdown ?? "";
+
+      if (workingMarkdown.trim() && !window.confirm(`Delete “${file?.title ?? "document"}”? This document cannot be restored.`)) {
+        return;
+      }
+
       const deletingActiveFile = fileId === activeFileIdRef.current;
       const previousSaveState = saveStateRef.current;
 
@@ -770,6 +929,9 @@ export function App() {
       try {
         const workspace = await storageRef.current.deleteFile(fileId, DEFAULT_MARKDOWN);
 
+        documentSessionsRef.current.remove(fileId);
+        documentSessionsRef.current.seed(workspace.files);
+        clearEmergencyDraftBackup(fileId);
         fileRevisionsRef.current = new Map(workspace.files.map((file) => [file.id, file.revision]));
         setFiles(workspace.files);
 
@@ -787,7 +949,7 @@ export function App() {
         setSaveState("unavailable");
       }
     },
-    [applyActiveFile, captureStorageError, completeAction, queueCurrentFileSave, renamingFileId]
+    [applyActiveFile, captureStorageError, completeAction, files, queueCurrentFileSave, renamingFileId]
   );
 
   const beginRenameFile = useCallback((file: FileRecord) => {
@@ -835,13 +997,27 @@ export function App() {
   );
 
   const toggleSidebar = useCallback(() => {
+    if (isMobileViewport) {
+      setMobileFilesOpen((current) => {
+        const nextOpen = !current;
+        completeAction("sidebar", nextOpen ? "Files opened" : "Files closed");
+
+        if (!nextOpen) {
+          window.setTimeout(() => sidebarToggleButtonRef.current?.focus(), 0);
+        }
+
+        return nextOpen;
+      });
+      return;
+    }
+
     setOutlineVisible((current) => {
       const nextVisible = !current;
 
       completeAction("sidebar", nextVisible ? "Sidebar shown" : "Sidebar hidden");
       return nextVisible;
     });
-  }, [completeAction]);
+  }, [completeAction, isMobileViewport]);
 
   const chooseViewMode = useCallback(
     (nextViewMode: ViewMode) => {
@@ -875,11 +1051,13 @@ export function App() {
       remoteFileRef.current = record;
 
       if (markdownRef.current !== record.markdown) {
+        documentSessionsRef.current.markConflict(currentFileId, record);
         setPendingConflictAction("reload");
         completeAction("reload", "Confirm reload");
         return;
       }
 
+      documentSessionsRef.current.acceptSaved(record);
       applyActiveFile(record);
       completeAction("reload", "Draft reloaded");
     } catch (error) {
@@ -898,6 +1076,7 @@ export function App() {
       return;
     }
 
+    documentSessionsRef.current.acceptSaved(record);
     applyActiveFile(record);
     completeAction("reload", "Draft reloaded");
   }, [applyActiveFile, completeAction]);
@@ -928,6 +1107,7 @@ export function App() {
 
       currentFileRevisionRef.current = record.revision;
       fileRevisionsRef.current.set(record.id, record.revision);
+      documentSessionsRef.current.markSaved(record);
       remoteFileRef.current = null;
       clearEmergencyDraftBackup(record.id);
       setPendingConflictAction(null);
@@ -942,6 +1122,40 @@ export function App() {
     }
   }, [captureStorageError, completeAction, upsertFile]);
 
+  const saveConflictAsCopy = useCallback(async () => {
+    const currentFileId = activeFileIdRef.current;
+    const session = currentFileId ? documentSessionsRef.current.get(currentFileId) : null;
+
+    if (!currentFileId || !session) {
+      return;
+    }
+
+    const sourceFile = files.find((file) => file.id === currentFileId);
+    const copyTitle = `${sourceFile?.title ?? "Recovered draft"} (local copy)`;
+    const remoteFile = session.remoteFile;
+
+    try {
+      const record = await storageRef.current.createFile(session.workingMarkdown, copyTitle);
+
+      pendingSavesRef.current.delete(currentFileId);
+
+      if (remoteFile) {
+        documentSessionsRef.current.acceptSaved(remoteFile);
+        fileRevisionsRef.current.set(remoteFile.id, remoteFile.revision);
+        clearEmergencyDraftBackup(remoteFile.id);
+        upsertFile(remoteFile);
+      }
+
+      documentSessionsRef.current.acceptSaved(record);
+      applyActiveFile(record);
+      completeAction("conflict-copy", "Local version saved as a separate document");
+    } catch (error) {
+      captureStorageError(error, "save conflict copy");
+      storageWritePausedRef.current = true;
+      setDocumentSaveState(currentFileId, "unavailable");
+    }
+  }, [applyActiveFile, captureStorageError, completeAction, files, setDocumentSaveState, upsertFile]);
+
   const updateSplitRatioFromClientX = useCallback((clientX: number) => {
     const workspace = workspaceRef.current;
 
@@ -949,8 +1163,23 @@ export function App() {
       return;
     }
 
-    const rect = workspace.getBoundingClientRect();
-    const rawRatio = ((clientX - rect.left) / rect.width) * 100;
+    const editorPane = workspace.querySelector<HTMLElement>(".editor-pane");
+    const previewPane = workspace.querySelector<HTMLElement>(".preview-pane");
+
+    if (!editorPane || !previewPane) {
+      return;
+    }
+
+    const editorRect = editorPane.getBoundingClientRect();
+    const previewRect = previewPane.getBoundingClientRect();
+    const paneAreaLeft = editorRect.left;
+    const paneAreaWidth = previewRect.right - paneAreaLeft;
+
+    if (paneAreaWidth <= 0) {
+      return;
+    }
+
+    const rawRatio = ((clientX - paneAreaLeft) / paneAreaWidth) * 100;
 
     setSplitRatio(clampSplitRatio(rawRatio));
   }, []);
@@ -964,7 +1193,6 @@ export function App() {
       event.preventDefault();
       setIsResizing(true);
       setSplitIndicatorVisible(true);
-      updateSplitRatioFromClientX(event.clientX);
 
       const onPointerMove = (moveEvent: PointerEvent) => {
         updateSplitRatioFromClientX(moveEvent.clientX);
@@ -1036,14 +1264,15 @@ export function App() {
           </button>
           <span className="topbar-divider" aria-hidden="true" />
           <button
+            ref={sidebarToggleButtonRef}
             type="button"
-            className={`${outlineVisible ? "is-active" : ""}${activeAction === "sidebar" ? " is-action-complete" : ""}`}
+            className={`${sidebarVisible ? "is-active" : ""}${activeAction === "sidebar" ? " is-action-complete" : ""}`}
             onClick={toggleSidebar}
-            title={outlineVisible ? "Hide sidebar" : "Show sidebar"}
-            aria-label={outlineVisible ? "Hide sidebar" : "Show sidebar"}
-            aria-pressed={outlineVisible}
+            title={sidebarVisible ? (isMobileViewport ? "Close files" : "Hide sidebar") : isMobileViewport ? "Open files" : "Show sidebar"}
+            aria-label={sidebarVisible ? (isMobileViewport ? "Close files" : "Hide sidebar") : isMobileViewport ? "Open files" : "Show sidebar"}
+            aria-pressed={sidebarVisible}
           >
-            {outlineVisible ? <PanelLeftClose size={16} aria-hidden="true" /> : <PanelLeft size={16} aria-hidden="true" />}
+            {sidebarVisible ? <PanelLeftClose size={16} aria-hidden="true" /> : <PanelLeft size={16} aria-hidden="true" />}
           </button>
 
           <div className="view-switcher" role="group" aria-label="View mode" data-view-mode={effectiveViewMode}>
@@ -1095,20 +1324,48 @@ export function App() {
 
       <main
         ref={workspaceRef}
-        className={`workspace sidebar-${outlineVisible ? "visible" : "hidden"} mode-${effectiveViewMode} split-${splitRatio}${
+        className={`workspace sidebar-${sidebarVisible ? "visible" : "hidden"} mode-${effectiveViewMode} split-${splitRatio}${
           isResizing ? " is-resizing" : ""
         }`}
         style={workspaceStyle}
       >
-        {outlineVisible && (
+        {sidebarVisible && (
           <aside className="workspace-sidebar" aria-label="File manager and document outline">
             <section className="sidebar-section file-manager-panel" aria-label="Files">
               <div className="sidebar-title-row">
                 <div className="outline-title">Files</div>
-                <button type="button" className="sidebar-icon-button" onClick={createNewFile} title="New file" aria-label="New file">
-                  <Plus size={15} aria-hidden="true" />
-                </button>
+                <div className="sidebar-file-actions">
+                  <button type="button" className="sidebar-icon-button" onClick={openMarkdownFilePicker} title="Open Markdown file" aria-label="Open Markdown file">
+                    <Upload size={15} aria-hidden="true" />
+                  </button>
+                  <button type="button" className="sidebar-icon-button" onClick={downloadMarkdown} title="Download Markdown" aria-label="Download Markdown">
+                    <Download size={15} aria-hidden="true" />
+                  </button>
+                  <button type="button" className="sidebar-icon-button" onClick={createNewFile} title="New file" aria-label="New file">
+                    <Plus size={15} aria-hidden="true" />
+                  </button>
+                  {isMobileViewport && (
+                    <button
+                      ref={mobileSidebarCloseRef}
+                      type="button"
+                      className="sidebar-icon-button mobile-sidebar-close"
+                      onClick={toggleSidebar}
+                      title="Close files"
+                      aria-label="Close files"
+                    >
+                      <X size={15} aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
               </div>
+              <input
+                ref={markdownFileInputRef}
+                className="visually-hidden"
+                type="file"
+                accept=".md,.markdown,text/markdown,text/plain"
+                onChange={(event) => void importMarkdownFile(event)}
+                aria-label="Choose Markdown file"
+              />
 
               <ol className="file-list">
                 {files.length === 0 ? (
@@ -1149,11 +1406,26 @@ export function App() {
                             className="file-list-button"
                             onClick={() => void switchActiveFile(file.id)}
                             onDblClick={() => beginRenameFile(file)}
+                            onKeyDown={(event) => {
+                              if (event.key === "F2") {
+                                event.preventDefault();
+                                beginRenameFile(file);
+                              }
+                            }}
                             aria-pressed={file.id === activeFileId}
                             title={file.title}
                           >
                             <FileText size={15} aria-hidden="true" />
                             <span>{file.title}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="file-rename-button"
+                            onClick={() => beginRenameFile(file)}
+                            title={`Rename ${file.title}`}
+                            aria-label={`Rename ${file.title}`}
+                          >
+                            <Pencil size={14} aria-hidden="true" />
                           </button>
                           <button
                             type="button"
@@ -1232,7 +1504,7 @@ export function App() {
 
       <StatusBar
         actionStatus={actionStatus}
-        diagnosticsCount={diagnostics.length}
+        diagnostics={diagnostics}
         pendingConflictAction={pendingConflictAction}
         renderDurationMs={renderDurationMs}
         renderMessage={renderMessage}
@@ -1241,7 +1513,9 @@ export function App() {
         wordCount={wordCount}
         onCancelConflictReload={cancelConflictReload}
         onConfirmConflictReload={confirmConflictReload}
+        onDownloadMarkdown={downloadMarkdown}
         onReloadConflictDraft={reloadConflictDraft}
+        onSaveConflictAsCopy={saveConflictAsCopy}
         onOverwriteConflictDraft={overwriteConflictDraft}
       />
     </div>
@@ -1344,26 +1618,18 @@ function countWords(markdown: string): number {
   return words?.length ?? 0;
 }
 
-function createClientId(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function sanitizeFilename(value: string): string {
+  const sanitized = value
+    .trim()
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")
+    .replace(/\s+/g, " ")
+    .slice(0, 120);
+
+  return sanitized || "document";
 }
 
-function takePendingSave(pendingSaves: Map<string, PendingSave>, activeFileId: string | null): PendingSave | null {
-  const activeSave = activeFileId ? pendingSaves.get(activeFileId) : undefined;
-
-  if (activeSave) {
-    pendingSaves.delete(activeSave.fileId);
-    return activeSave;
-  }
-
-  const nextSave = pendingSaves.values().next().value as PendingSave | undefined;
-
-  if (!nextSave) {
-    return null;
-  }
-
-  pendingSaves.delete(nextSave.fileId);
-  return nextSave;
+function createClientId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function broadcastFile(record: FileRecord, channel: BroadcastChannel | null): void {
@@ -1394,21 +1660,6 @@ function parseFileBroadcast(value: unknown): FileRecord | null {
   return record;
 }
 
-function hasUnsavedDraftForFile(
-  fileId: string,
-  saveState: SaveState,
-  pendingSaves: Map<string, PendingSave>,
-  inFlightSave: PendingSave | null
-): boolean {
-  return (
-    pendingSaves.has(fileId) ||
-    inFlightSave?.fileId === fileId ||
-    saveState === "saving" ||
-    saveState === "unavailable" ||
-    saveState === "conflict"
-  );
-}
-
 function writeEmergencyDraftBackup(backup: EmergencyDraftBackup): void {
   try {
     sessionStorage.setItem(EMERGENCY_DRAFT_BACKUP_KEY, JSON.stringify(backup));
@@ -1433,10 +1684,14 @@ function clearEmergencyDraftBackup(fileId?: string): void {
     }
 
     const backup = readEmergencyDraftBackup();
+    const drafts = backup?.drafts.filter((draft) => draft.fileId !== fileId) ?? [];
 
-    if (!backup || backup.fileId === fileId) {
+    if (drafts.length === 0) {
       sessionStorage.removeItem(EMERGENCY_DRAFT_BACKUP_KEY);
+      return;
     }
+
+    writeEmergencyDraftBackup({ version: 3, drafts });
   } catch {
     // Ignore blocked or corrupted session storage.
   }
@@ -1447,12 +1702,48 @@ function normalizeEmergencyDraftBackup(value: unknown): EmergencyDraftBackup | n
     return null;
   }
 
-  const candidate = value as Partial<EmergencyDraftBackup>;
+  const candidate = value as {
+    version?: unknown;
+    drafts?: unknown;
+    fileId?: unknown;
+    markdown?: unknown;
+    expectedRevision?: unknown;
+    updatedAt?: unknown;
+  };
+
+  if (candidate.version === 3 && Array.isArray(candidate.drafts)) {
+    const drafts = candidate.drafts
+      .map((draft) => normalizeEmergencyDraftEntry(draft))
+      .filter((draft): draft is EmergencyDraftEntry => Boolean(draft));
+    return drafts.length > 0 ? { version: 3, drafts } : null;
+  }
+
+  if (candidate.version === 2 && Array.isArray(candidate.drafts)) {
+    const drafts = candidate.drafts
+      .map((draft) => normalizeEmergencyDraftEntry(draft, "pending"))
+      .filter((draft): draft is EmergencyDraftEntry => Boolean(draft));
+    return drafts.length > 0 ? { version: 3, drafts } : null;
+  }
+
+  if (candidate.version === 1) {
+    const legacyDraft = normalizeEmergencyDraftEntry(candidate, "pending");
+    return legacyDraft ? { version: 3, drafts: [legacyDraft] } : null;
+  }
+
+  return null;
+}
+
+function normalizeEmergencyDraftEntry(value: unknown, fallbackState?: EmergencyDraftEntry["state"]): EmergencyDraftEntry | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const candidate = value as Partial<EmergencyDraftEntry>;
   const expectedRevision = Number(candidate.expectedRevision);
   const updatedAt = Number(candidate.updatedAt);
+  const state = candidate.state === "pending" || candidate.state === "conflict" ? candidate.state : fallbackState;
 
   if (
-    candidate.version !== 1 ||
     typeof candidate.fileId !== "string" ||
     candidate.fileId.length === 0 ||
     typeof candidate.markdown !== "string" ||
@@ -1460,29 +1751,30 @@ function normalizeEmergencyDraftBackup(value: unknown): EmergencyDraftBackup | n
     expectedRevision < 0 ||
     !Number.isInteger(expectedRevision) ||
     !Number.isFinite(updatedAt) ||
-    updatedAt < 0
+    updatedAt < 0 ||
+    !state
   ) {
     return null;
   }
 
   return {
-    version: 1,
     fileId: candidate.fileId,
     markdown: candidate.markdown,
     expectedRevision,
-    updatedAt
+    updatedAt,
+    state
   };
 }
 
 function shouldRestoreEmergencyDraft(
-  backup: EmergencyDraftBackup | null,
+  backup: EmergencyDraftEntry,
   activeFile: FileRecord
-): backup is EmergencyDraftBackup {
+): boolean {
   return Boolean(
     backup &&
       backup.fileId === activeFile.id &&
       backup.markdown !== activeFile.markdown &&
-      backup.updatedAt >= activeFile.updatedAt
+      (backup.state === "conflict" || backup.updatedAt >= activeFile.updatedAt)
   );
 }
 

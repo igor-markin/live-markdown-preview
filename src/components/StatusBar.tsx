@@ -1,11 +1,11 @@
 import { Check, FileText, Info, ListChecks, TriangleAlert } from "lucide-preact";
-import type { RenderState, SaveState } from "../types";
+import type { DiagnosticItem, RenderState, SaveState } from "../types";
 
 type ConflictAction = null | "reload";
 
 interface StatusBarProps {
   actionStatus: string;
-  diagnosticsCount: number;
+  diagnostics: DiagnosticItem[];
   pendingConflictAction: ConflictAction;
   renderDurationMs: number | null;
   renderMessage: string;
@@ -14,13 +14,15 @@ interface StatusBarProps {
   wordCount: number;
   onCancelConflictReload: () => void;
   onConfirmConflictReload: () => void;
+  onDownloadMarkdown: () => void;
   onReloadConflictDraft: () => void;
+  onSaveConflictAsCopy: () => void;
   onOverwriteConflictDraft: () => void;
 }
 
 export function StatusBar({
   actionStatus,
-  diagnosticsCount,
+  diagnostics,
   pendingConflictAction,
   renderDurationMs,
   renderMessage,
@@ -29,7 +31,9 @@ export function StatusBar({
   wordCount,
   onCancelConflictReload,
   onConfirmConflictReload,
+  onDownloadMarkdown,
   onReloadConflictDraft,
+  onSaveConflictAsCopy,
   onOverwriteConflictDraft
 }: StatusBarProps) {
   return (
@@ -41,6 +45,13 @@ export function StatusBar({
         {saveState === "conflict" && <TriangleAlert size={14} aria-hidden="true" />}
         {saveStateLabel(saveState)}
       </span>
+      {saveState === "unavailable" && (
+        <span className="status-actions">
+          <button type="button" onClick={onDownloadMarkdown}>
+            Download document
+          </button>
+        </span>
+      )}
       {saveState === "conflict" && (
         <span className="status-actions">
           {pendingConflictAction === "reload" ? (
@@ -61,6 +72,9 @@ export function StatusBar({
               <button type="button" onClick={onOverwriteConflictDraft}>
                 Overwrite
               </button>
+              <button type="button" onClick={onSaveConflictAsCopy}>
+                Save local copy
+              </button>
             </>
           )}
         </span>
@@ -75,11 +89,21 @@ export function StatusBar({
         <FileText size={14} aria-hidden="true" />
         {wordCount} words
       </span>
-      {diagnosticsCount > 0 && (
-        <span className="status-pill status-warning">
-          <ListChecks size={14} aria-hidden="true" />
-          {diagnosticsCount} diagnostics
-        </span>
+      {diagnostics.length > 0 && (
+        <details className="status-diagnostics">
+          <summary className="status-pill status-warning">
+            <ListChecks size={14} aria-hidden="true" />
+            {diagnostics.length} diagnostics
+          </summary>
+          <ul>
+            {diagnostics.map((diagnostic, index) => (
+              <li key={`${diagnostic.severity}-${diagnostic.line ?? "document"}-${index}`}>
+                {diagnostic.line ? `Line ${diagnostic.line}: ` : ""}
+                {diagnostic.message}
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
       {actionStatus && (
         <span className="status-pill action-status" role="status" aria-live="polite" aria-atomic="true">
@@ -108,7 +132,7 @@ function saveStateLabel(state: SaveState): string {
     return "Draft changed in another tab";
   }
 
-  return "Saved";
+  return "Saved in this browser";
 }
 
 function renderStateLabel(state: RenderState, durationMs: number | null, message: string): string {

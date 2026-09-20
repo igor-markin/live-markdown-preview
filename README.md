@@ -6,7 +6,7 @@
 
 ![Live Markdown Preview marketing hero](docs/assets/marketing-hero.webp)
 
-A frontend-only, local-first Markdown editor and live preview app. Drafts stay in the browser, render in a Web Worker, and can be copied as Markdown or sanitized HTML.
+**Private Markdown workspace. Write locally, preview instantly, and copy clean HTML.** No account is required and document content is never sent to an application server. Keep several browser drafts, open or download `.md` files, and move from source to a reusable result without leaving the page.
 
 ## Features
 
@@ -15,9 +15,9 @@ A frontend-only, local-first Markdown editor and live preview app. Drafts stay i
 - Raw HTML support with DOMPurify sanitization, explicit URL hardening, and sanitized HTML copy.
 - Local drafts, multiple files, and preferences stored in IndexedDB.
 - Same-device draft conflict detection across tabs.
-- Emergency per-tab recovery for reloads during pending autosave.
+- Per-document working copies, conflict handling, and emergency recovery for multiple unsaved drafts.
 - Outline, file sidebar, resizable editor/preview split, and persisted layout preferences.
-- Copy Markdown, copy sanitized HTML, browser print-based PDF export, color scheme picker, and Help dialog.
+- Open and download Markdown, copy Markdown or clean HTML code, use browser print / Save PDF, choose a color scheme, and open the Help dialog.
 - Large document and large preview-output safeguards.
 
 ## Local-first model

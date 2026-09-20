@@ -42,11 +42,17 @@ describe("MarkdownWorkerClient", () => {
     client.render("# Old", { onRendered, onError });
     client.render("# New", { onRendered, onError });
 
+    expect(worker.sent).toEqual([{ type: "render", version: 1, markdown: "# Old" }]);
+
     worker.emit({
       type: "rendered",
       version: 1,
       result: { html: "<h1>Old</h1>", headings: [], diagnostics: [] }
     });
+    expect(worker.sent).toEqual([
+      { type: "render", version: 1, markdown: "# Old" },
+      { type: "render", version: 2, markdown: "# New" }
+    ]);
     worker.emit({
       type: "rendered",
       version: 2,
@@ -55,6 +61,40 @@ describe("MarkdownWorkerClient", () => {
 
     expect(onRendered).toHaveBeenCalledTimes(1);
     expect(onRendered).toHaveBeenCalledWith({ html: "<h1>New</h1>", headings: [], diagnostics: [] });
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("keeps only the latest render queued while a worker request is active", () => {
+    const worker = new FakeWorker();
+    const client = new MarkdownWorkerClient(worker);
+    const onRendered = vi.fn();
+    const onError = vi.fn();
+
+    client.render("# First", { onRendered, onError });
+    client.render("# Second", { onRendered, onError });
+    client.render("# Latest", { onRendered, onError });
+
+    expect(worker.sent).toEqual([{ type: "render", version: 1, markdown: "# First" }]);
+
+    worker.emit({
+      type: "rendered",
+      version: 1,
+      result: { html: "<h1>First</h1>", headings: [], diagnostics: [] }
+    });
+
+    expect(worker.sent).toEqual([
+      { type: "render", version: 1, markdown: "# First" },
+      { type: "render", version: 3, markdown: "# Latest" }
+    ]);
+    expect(onRendered).not.toHaveBeenCalled();
+
+    worker.emit({
+      type: "rendered",
+      version: 3,
+      result: { html: "<h1>Latest</h1>", headings: [], diagnostics: [] }
+    });
+
+    expect(onRendered).toHaveBeenCalledWith({ html: "<h1>Latest</h1>", headings: [], diagnostics: [] });
     expect(onError).not.toHaveBeenCalled();
   });
 

@@ -2,7 +2,6 @@ import DOMPurify from "dompurify";
 
 const SAFE_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"]);
 const SAFE_DATA_IMAGE_PATTERN = /^data:image\/(?:avif|gif|jpe?g|png|webp);base64,[a-z0-9+/=\s]+$/i;
-const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F]/;
 
 export function sanitizeMarkdownHtml(html: string): string {
@@ -103,15 +102,7 @@ function isSafeImageSrc(value: string): boolean {
     return SAFE_DATA_IMAGE_PATTERN.test(src);
   }
 
-  if (src.startsWith("//")) {
-    return false;
-  }
-
-  if (URL_SCHEME_PATTERN.test(src)) {
-    return isSameOriginHttpUrl(src);
-  }
-
-  return true;
+  return isSameOriginHttpUrl(src);
 }
 
 function isSameOriginHttpUrl(value: string): boolean {
