@@ -43,6 +43,9 @@
     privNote: 'Local means local: drafts live only in the browser and on the address where you wrote them. Clearing site data deletes them, so download important files as <code>.md</code>.',
     finalTitle: 'Start with a heading. Let the rest follow.', ph: 'Featured on Product Hunt ↗',
     footLabel: 'Links', issues: 'Report a bug', license: 'MIT license', author: 'Made by Igor Markin',
+    auKicker: 'The author', auH: 'Designed and built by Igor Markin',
+    auP: 'Product, design and code. Senior full-stack engineer in Israel.', auSite: 'About me', auMail: 'Email me',
+    toLight: 'Switch to light theme', toDark: 'Switch to dark theme',
     demo: [
       '# A little space for your ideas',
       '',
@@ -106,6 +109,9 @@
     privNote: 'Локально значит локально: черновики живут только в этом браузере и по тому адресу, где вы их писали. Очистка данных сайта их удалит, поэтому важное скачивайте в <code>.md</code>.',
     finalTitle: 'Начните с заголовка. Остальное приложится.', ph: 'Мы на Product Hunt ↗',
     footLabel: 'Ссылки', issues: 'Сообщить об ошибке', license: 'Лицензия MIT', author: 'Сделал Игорь Маркин',
+    auKicker: 'Автор', auH: 'Придумал и сделал Игорь Маркин',
+    auP: 'Продукт, дизайн и код. Senior full-stack разработчик, Израиль.', auSite: 'Обо мне', auMail: 'Написать',
+    toLight: 'Включить светлую тему', toDark: 'Включить тёмную тему',
     demo: [
       '# Немного места для идей',
       '',
@@ -127,7 +133,73 @@
     ].join('\n')
   };
 
-  const dict = { en, ru };
+  const he = {
+    title: 'Live Markdown Preview — עורך Markdown פרטי בדפדפן',
+    description: 'כותבים Markdown ורואים את התוצאה מיד. הטיוטות נשמרות בדפדפן: בלי חשבון, בלי שרת ובלי מעקב. 19 ערכות צבעים, העתקת HTML נקי והדפסה ל-PDF.',
+    skip: 'דילוג לתוכן', navLabel: 'ניווט', langLabel: 'שפת האתר',
+    navFeatures: 'יכולות', navThemes: 'ערכות צבעים', navPrivate: 'פרטיות', openShort: 'לעורך',
+    eyebrow: 'חינם · קוד פתוח · עובד גם בלי אינטרנט אחרי הטעינה',
+    h1a: 'קצת מקום', h1b: 'לרעיונות שלך.',
+    lead: 'כותבים Markdown בצד אחד ורואים אותו מתעצב בצד השני. הטיוטות נשארות בדפדפן הזה: בלי חשבון, בלי שרת ובלי מעקב.',
+    open: 'פתיחת העורך', source: 'קוד מקור',
+    ctaMeta: 'Chrome, Firefox ו-Safari · מחשב ונייד · רישיון MIT',
+    saved: 'נשמר בדפדפן', previewLabel: 'תצוגה', srcLabel: 'קוד Markdown. אפשר להקליד כאן ולנסות.',
+    demoCaption: 'אפשר לנסות: ההדגמה ניתנת לעריכה. היא משתמשת במנוע פשוט, והעורך עצמו תומך ב-GitHub Flavored Markdown המלא. ממשק העורך באנגלית.',
+    factsLabel: 'בקצרה',
+    fact1: 'שרתים רואים את הטקסט שלך: הדף סטטי, והכול קורה במכשיר שלך',
+    fact2: 'ערכות צבעים, מ-GitHub Light ועד Catppuccin, Dracula ו-Nord',
+    fact3n: 'בלי הרשמה', fact3: 'פותחים את הדף ומתחילים לכתוב; הטיוטה נשמרת תוך כדי הקלדה',
+    featKicker: 'יכולות', featTitle: 'כל מה שטיוטת Markdown צריכה. ושום דבר מיותר.',
+    f1t: 'תצוגה מיידית', f1: 'העיבוד רץ ב-Web Worker, כך שגם מסמך ארוך לא מאט את העורך.',
+    f2t: 'GitHub Flavored Markdown', f2: 'טבלאות, רשימות משימות, קו חוצה, קישורים אוטומטיים ו-HTML — כמו שהם מוצגים ב-GitHub.',
+    f3t: 'הרבה טיוטות במקום אחד', f3: 'רשימת קבצים, תוכן עניינים לפי כותרות ופיצול מתכוונן. פותחים ומורידים קובצי <code>.md</code> אמיתיים.',
+    f4t: 'HTML נקי בלחיצה אחת', f4: 'מעתיקים Markdown או HTML מסונן, מוכן להדבקה במערכת ניהול תוכן, במייל או בתיעוד.',
+    f5t: 'הדפסה ו-PDF', f5: 'התצוגה מודפסת בצורה נקייה: אפשר לשמור דף מוכן כ-PDF דרך הדפדפן.',
+    f6t: 'קשה לאבד עבודה', f6: 'שמירה אוטומטית, אזהרה כששתי לשוניות עורכות אותה טיוטה, ושחזור שינויים שלא נשמרו אחרי רענון.',
+    lookKicker: 'העורך', lookTitle: 'הקוד והתוצאה, זה לצד זה.', shotsLabel: 'צילומי מסך',
+    shot0: 'GitHub Light', shot1: 'Catppuccin Mocha', shot2: 'בחירת ערכה',
+    shotCap0: 'קבצים ותוכן עניינים בצד, Markdown באמצע ותצוגה חיה בצד השני.',
+    shotCap1: 'אותה סביבת עבודה ב-Catppuccin Mocha — ערכה כהה ורכה לערבים ארוכים.',
+    shotCap2: 'מצב תצוגה ותפריט ערכות הצבעים: 19 ערכות, בהירות וכהות.',
+    shotAlt0: 'העורך בערכת GitHub Light: קבצים ותוכן עניינים, קוד Markdown ותצוגה חיה',
+    shotAlt1: 'העורך בערכת Catppuccin Mocha עם הדגשות בגוון לבנדר',
+    shotAlt2: 'מצב תצוגה עם תפריט ערכות הצבעים פתוח',
+    themesKicker: 'ערכות צבעים', themesTitle: 'להרגיש בבית.',
+    themesSub: 'בעורך יש 19 ערכות צבעים לקוד ולתצוגה. בחירת ערכה כאן צובעת מחדש את ההדגמה למעלה; בעורך עצמו הבחירה נשמרת.',
+    swatchLabel: 'ערכת הצבעים של ההדגמה',
+    privKicker: 'פרטיות', privTitle: 'המילים שלך לא יוצאות מהדפדפן.',
+    p1t: 'כותבים', p1: 'הקוד נערך ב-CodeMirror. הדף הוא קבצים סטטיים, ואין שרת שאפשר לשלוח אליו משהו.',
+    p2t: 'Worker מעבד', p2: 'unified ו-remark הופכים Markdown ל-HTML בתהליך רקע.',
+    p3t: 'DOMPurify מנקה', p3: 'סקריפטים, מטפלי אירועים, מסגרות, טפסים וקישורים מסוכנים מוסרים לפני התצוגה.',
+    p4t: 'IndexedDB שומר', p4: 'טיוטות והגדרות נשמרות במכשיר הזה. בלי אנליטיקה ובלי טלמטריה.',
+    privNote: 'מקומי זה מקומי: הטיוטות נשמרות רק בדפדפן הזה ורק בכתובת שבה נכתבו. ניקוי נתוני האתר ימחק אותן, לכן כדאי להוריד קבצים חשובים כ-<code>.md</code>.',
+    finalTitle: 'מתחילים בכותרת. השאר יבוא.', ph: 'אנחנו ב-Product Hunt ↗',
+    footLabel: 'קישורים', issues: 'דיווח על באג', license: 'רישיון MIT', author: 'נוצר על ידי איגור מרקין',
+    auKicker: 'היוצר', auH: 'תוכנן ונבנה על ידי איגור מרקין',
+    auP: 'מוצר, עיצוב וקוד. מפתח Full-stack בכיר, ישראל.', auSite: 'עליי', auMail: 'לכתוב לי',
+    toLight: 'מעבר לערכה בהירה', toDark: 'מעבר לערכה כהה',
+    demo: [
+      '# קצת מקום לרעיונות',
+      '',
+      'ממחשבה ראשונה ועד משהו **ששווה לשתף**.',
+      '',
+      '> הטקסט נשאר בדפדפן הזה.',
+      '',
+      '## תוכנית לשבוע',
+      '',
+      '- [x] למצוא פינה שקטה',
+      '- [x] לכתוב טיוטה ראשונה',
+      '- [ ] לשתף את מי שחשוב',
+      '',
+      '| יום | צעד קטן |',
+      '| --- | --- |',
+      '| ראשון | לאסוף רעיונות |',
+      '| חמישי | ללטש `ולשלוח` |',
+      ''
+    ].join('\n')
+  };
+
+  const dict = { en, he, ru };
   const schemes = [
     ['GitHub Light', '#ffffff', '#0969da', '#1f2328'], ['GitHub Dark', '#0d1117', '#58a6ff', '#f0f6fc'],
     ['Solarized Light', '#fdf6e3', '#268bd2', '#586e75'], ['VS Code Dark+', '#1e1e1e', '#007acc', '#d4d4d4'],
@@ -233,12 +305,35 @@
     update();
   });
 
+  // Theme: the OS setting (macOS, Windows, iOS, Android) until the visitor picks one with the toggle.
+  const root = document.documentElement;
+  const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+  const toggle = document.getElementById('theme-toggle');
+  function isDark() { return root.dataset.theme ? root.dataset.theme === 'dark' : systemDark.matches; }
+  function syncThemeToggle() {
+    toggle.setAttribute('aria-label', dict[lang][isDark() ? 'toLight' : 'toDark']);
+    toggle.title = toggle.getAttribute('aria-label');
+  }
+  toggle.addEventListener('click', () => {
+    const next = isDark() ? 'light' : 'dark';
+    root.dataset.theme = next;
+    store.set('lmp-site-theme', next);
+    syncThemeToggle();
+    // Until the visitor picks a demo scheme, keep the demo on the page theme's default scheme.
+    if (!win.style.getPropertyValue('--d-bg')) {
+      buttons.forEach((b, k) => { const on = k === (next === 'dark' ? 3 : 0); b.setAttribute('aria-checked', String(on)); b.tabIndex = on ? 0 : -1; });
+    }
+  });
+  systemDark.addEventListener('change', syncThemeToggle);
+
   // Language
   let lang = 'en';
   function applyLang(next, replay) {
     lang = next;
     const t = dict[lang];
     document.documentElement.lang = lang;
+    document.documentElement.dir = lang === 'he' ? 'rtl' : 'ltr';
+    syncThemeToggle();
     document.title = t.title;
     document.querySelector('meta[name="description"]').setAttribute('content', t.description);
     document.querySelectorAll('[data-i18n]').forEach((el) => {
@@ -312,15 +407,14 @@
     const d = ['ArrowRight', 'ArrowDown'].includes(e.key) ? 1 : ['ArrowLeft', 'ArrowUp'].includes(e.key) ? -1 : 0;
     if (d) { e.preventDefault(); pickScheme((cur + d + buttons.length) % buttons.length, true); }
   });
-  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const dark = isDark();
   buttons[dark ? 3 : 0].setAttribute('aria-checked', 'true');
   buttons[dark ? 3 : 0].tabIndex = 0;
 
-  // Initial language: ?lang=, then the saved choice, then the browser language.
+  // Initial language: ?lang=, then the saved choice, otherwise English.
   const param = new URLSearchParams(location.search).get('lang');
   const saved = store.get('lmp-site-lang');
-  const browser = (navigator.languages || [navigator.language || 'en']).some((l) => /^(ru|uk|be|kk)\b/i.test(l)) ? 'ru' : 'en';
-  const initial = dict[param] ? param : dict[saved] ? saved : browser;
+  const initial = dict[param] ? param : dict[saved] ? saved : 'en';
   document.querySelectorAll('.lang button').forEach((b) => b.addEventListener('click', () => {
     store.set('lmp-site-lang', b.dataset.lang);
     applyLang(b.dataset.lang, true);

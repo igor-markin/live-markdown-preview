@@ -96,14 +96,14 @@ The app has two hosts. Both serve the same editor.
 
 | Host | URL | Source |
 | --- | --- | --- |
-| GitHub Pages | https://igor-markin.github.io/live-markdown-preview/ (website) and `/editor/` (editor) | `.github/workflows/pages.yml` on every push to `main` |
+| GitHub Pages | https://igor-markin.github.io/live-markdown-preview/ (website) and `/editor/` (editor) | `.github/workflows/pages.yml` pushes the built site to the `gh-pages` branch on every push to `main` |
 | Cloudflare Workers | https://live-markdown-preview.igor-markin.workers.dev/ | `npm run deploy` |
 
 Drafts are stored per origin. A draft written on one host is not visible on the other host.
 
 ### GitHub Pages
 
-The landing page is static HTML in `site/`. The workflow builds the editor with `vite build --mode pages` (base path `/live-markdown-preview/editor/`, no Cloudflare plugin) and puts it in `editor/` next to the landing page.
+The landing page is static HTML in `site/`, in English (default), Hebrew (RTL), and Russian, with a light/dark theme toggle that follows the OS setting until the visitor picks a theme. The workflow builds the editor with `vite build --mode pages` (base path `/live-markdown-preview/editor/`, no Cloudflare plugin) and puts it in `editor/` next to the landing page.
 
 GitHub Pages cannot send custom response headers. The Pages build puts the same CSP into a `<meta http-equiv="Content-Security-Policy">` tag and adds a `referrer` meta tag. These protections from `public/_headers` are not available on Pages: `frame-ancestors`, `X-Content-Type-Options`, and `Permissions-Policy`.
 
