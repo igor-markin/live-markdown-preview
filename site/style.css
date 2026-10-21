@@ -276,17 +276,19 @@ h3 { font-size: 18px; letter-spacing: -.01em; }
 
 /* Author */
 .author-wrap { padding: 0 0 72px; }
-.author {
-  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 24px 40px;
-  padding: 36px 40px; border: 1px solid var(--line); border-radius: 24px; background: var(--surface);
-  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-  background-size: 32px 32px;
+/* Shared author block from /brand/v1/, on the editor grid */
+.author-wrap {
+  --im-card: linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 32px 32px, linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 32px 32px, var(--surface);
+  --im-card-ink: var(--ink);
+  --im-card-muted: var(--muted);
+  --im-card-line: var(--line);
+  --im-chip: var(--paper);
+  --im-accent: var(--accent);
+  --im-accent-ink: var(--accent-ink);
+  --im-ring: var(--line);
+  --im-radius: 24px;
+  --im-btn-radius: 12px;
 }
-.author-photo { width: 88px; height: 88px; border-radius: 50%; object-fit: cover; border: 3px solid var(--paper); box-shadow: 0 0 0 1px var(--line); flex: none; }
-.author-text { flex: 1 1 320px; }
-.author h2 { font-size: clamp(24px, 3vw, 32px); margin-top: 12px; }
-.author-text > p:last-child { color: var(--muted); margin-top: 8px; }
-.author-actions { display: flex; flex-wrap: wrap; gap: 12px; }
 
 /* Footer */
 .foot { border-top: 1px solid var(--line); padding: 28px 0 40px; font-size: 14.5px; }
@@ -312,14 +314,12 @@ h3 { font-size: 18px; letter-spacing: -.01em; }
   .pane-src { border-inline-end: 0; border-bottom: 1px solid color-mix(in srgb, var(--d-fg) 12%, transparent); }
   .saved span { display: none; }
   .lead { font-size: 17.5px; }
-  .author { padding: 26px; }
   .top-row { gap: 12px; }
 }
 @media (max-width: 420px) {
   .brand span { display: none; }
   .wrap { width: calc(100% - 32px); }
-  .author-actions { width: 100%; }
-  .cta .btn, .author-actions .btn { flex: 1 1 100%; }
+  .cta .btn { flex: 1 1 100%; }
   .lang button { padding: 6px 7px; }
 }
 @media (prefers-reduced-motion: reduce) {

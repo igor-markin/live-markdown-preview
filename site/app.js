@@ -43,8 +43,6 @@
     privNote: 'Local means local: drafts live only in the browser and on the address where you wrote them. Clearing site data deletes them, so download important files as <code>.md</code>.',
     finalTitle: 'Start with a heading. Let the rest follow.', ph: 'Featured on Product Hunt ↗',
     footLabel: 'Links', issues: 'Report a bug', license: 'MIT license', author: 'Made by Igor Markin',
-    auKicker: 'The author', auH: 'Designed and built by Igor Markin',
-    auP: 'Product, design and code. Senior full-stack engineer in Israel.', auSite: 'About me', auMail: 'Email me',
     toLight: 'Switch to light theme', toDark: 'Switch to dark theme',
     demo: [
       '# A little space for your ideas',
@@ -109,8 +107,6 @@
     privNote: 'Локально значит локально: черновики живут только в этом браузере и по тому адресу, где вы их писали. Очистка данных сайта их удалит, поэтому важное скачивайте в <code>.md</code>.',
     finalTitle: 'Начните с заголовка. Остальное приложится.', ph: 'Мы на Product Hunt ↗',
     footLabel: 'Ссылки', issues: 'Сообщить об ошибке', license: 'Лицензия MIT', author: 'Сделал Игорь Маркин',
-    auKicker: 'Автор', auH: 'Придумал и сделал Игорь Маркин',
-    auP: 'Продукт, дизайн и код. Senior full-stack разработчик, Израиль.', auSite: 'Обо мне', auMail: 'Написать',
     toLight: 'Включить светлую тему', toDark: 'Включить тёмную тему',
     demo: [
       '# Немного места для идей',
@@ -175,8 +171,6 @@
     privNote: 'מקומי זה מקומי: הטיוטות נשמרות רק בדפדפן הזה ורק בכתובת שבה נכתבו. ניקוי נתוני האתר ימחק אותן, לכן כדאי להוריד קבצים חשובים כ-<code>.md</code>.',
     finalTitle: 'מתחילים בכותרת. השאר יבוא.', ph: 'אנחנו ב-Product Hunt ↗',
     footLabel: 'קישורים', issues: 'דיווח על באג', license: 'רישיון MIT', author: 'נוצר על ידי איגור מרקין',
-    auKicker: 'היוצר', auH: 'תוכנן ונבנה על ידי איגור מרקין',
-    auP: 'מוצר, עיצוב וקוד. מפתח Full-stack בכיר, ישראל.', auSite: 'עליי', auMail: 'לכתוב לי',
     toLight: 'מעבר לערכה בהירה', toDark: 'מעבר לערכה כהה',
     demo: [
       '# קצת מקום לרעיונות',
