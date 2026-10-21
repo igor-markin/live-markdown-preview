@@ -291,11 +291,7 @@ h3 { font-size: 18px; letter-spacing: -.01em; }
 }
 
 /* Footer */
-.foot { border-top: 1px solid var(--line); padding: 28px 0 40px; font-size: 14.5px; }
-.foot-row { display: flex; flex-wrap: wrap; gap: 16px 28px; align-items: center; justify-content: space-between; }
-.foot nav { display: flex; flex-wrap: wrap; gap: 8px 22px; }
-.foot nav a { color: var(--muted); text-decoration: none; }
-.foot nav a:hover { color: var(--ink); }
+.im-foot { --im-foot-ink: var(--ink); --im-foot-muted: var(--muted); --im-foot-line: var(--line); }
 
 @media (max-width: 980px) {
   .hero { grid-template-columns: 1fr; gap: 40px; padding-top: 48px; }
