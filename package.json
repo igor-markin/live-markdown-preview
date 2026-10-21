@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
+    "build:pages": "tsc --noEmit && vite build --mode pages --outDir dist-pages",
+    "build:site": "npm run build:pages && node scripts/assemble-site.mjs",
     "preview": "npm run build && wrangler dev",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live Markdown Preview — a private Markdown editor in your browser</title>
+  <meta name="description" content="Write Markdown and watch it take shape. Drafts stay in your browser: no account, no server, no tracking. 19 color schemes, safe HTML copy, print to PDF.">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f7f8f4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#101214" media="(prefers-color-scheme: dark)">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <link rel="canonical" href="https://igor-markin.github.io/live-markdown-preview/">
+  <link rel="alternate" hreflang="en" href="https://igor-markin.github.io/live-markdown-preview/?lang=en">
+  <link rel="alternate" hreflang="ru" href="https://igor-markin.github.io/live-markdown-preview/?lang=ru">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://igor-markin.github.io/live-markdown-preview/">
+  <meta property="og:title" content="Live Markdown Preview">
+  <meta property="og:description" content="A private Markdown editor in your browser. Write, preview instantly, copy clean HTML. No account.">
+  <meta property="og:image" content="https://igor-markin.github.io/live-markdown-preview/assets/og.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main" data-i18n="skip">Skip to content</a>
+
+  <header class="top">
+    <div class="wrap top-row">
+      <a class="brand" href="#" aria-label="Live Markdown Preview">
+        <img src="assets/icon.svg" width="28" height="28" alt="">
+        <span>Live Markdown Preview</span>
+      </a>
+      <nav class="nav" aria-label="Sections" data-i18n-aria="navLabel">
+        <a href="#features" data-i18n="navFeatures">Features</a>
+        <a href="#themes" data-i18n="navThemes">Themes</a>
+        <a href="#private" data-i18n="navPrivate">Privacy</a>
+      </nav>
+      <div class="top-actions">
+        <div class="lang" role="group" aria-label="Site language" data-i18n-aria="langLabel">
+          <button type="button" data-lang="en" aria-pressed="true" lang="en">EN</button>
+          <button type="button" data-lang="ru" aria-pressed="false" lang="ru">RU</button>
+        </div>
+        <a class="btn btn-small btn-primary" href="editor/" data-i18n="openShort">Open editor</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="dot" aria-hidden="true"></span><span data-i18n="eyebrow">Free · open source · works offline once loaded</span></p>
+        <h1 id="hero-title"><span data-i18n="h1a">A little space</span> <em data-i18n="h1b">for your ideas.</em></h1>
+        <p class="lead" data-i18n="lead">Write Markdown on the left, watch it take shape on the right. Your drafts stay in this browser: no account, no server, no tracking.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="editor/">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v12H4zM10 4v12"/></svg>
+            <span data-i18n="open">Open the editor</span>
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/igor-markin/live-markdown-preview" target="_blank" rel="noopener">
+            <svg viewBox="0 0 16 16" aria-hidden="true" class="gh"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+            <span data-i18n="source">Source code</span>
+          </a>
+        </div>
+        <p class="cta-meta" data-i18n="ctaMeta">Chrome, Firefox and Safari · desktop and mobile · MIT license</p>
+      </div>
+
+      <figure class="demo" aria-labelledby="demo-caption">
+        <div class="window" id="demo-window">
+          <div class="window-bar">
+            <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+            <span class="window-title">welcome.md</span>
+            <span class="saved"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8.5 3 3 7-7"/></svg><span data-i18n="saved">Saved in this browser</span></span>
+          </div>
+          <div class="panes">
+            <label class="pane pane-src">
+              <span class="pane-label">Markdown</span>
+              <span class="sr-only" data-i18n="srcLabel">Markdown source. Type here to try it.</span>
+              <textarea id="demo-src" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea>
+            </label>
+            <div class="pane pane-out">
+              <span class="pane-label" data-i18n="previewLabel">Preview</span>
+              <div class="md" id="demo-out" aria-live="off"></div>
+            </div>
+          </div>
+        </div>
+        <figcaption id="demo-caption" data-i18n="demoCaption">Try it: this demo is editable. It uses a simplified renderer; the real editor speaks full GitHub Flavored Markdown.</figcaption>
+      </figure>
+    </section>
+
+    <section class="facts wrap" aria-label="In short" data-i18n-aria="factsLabel">
+      <div class="fact"><b>0</b><span data-i18n="fact1">servers see your text: the page is static, everything happens on your device</span></div>
+      <div class="fact"><b>19</b><span data-i18n="fact2">color schemes, from GitHub Light to Catppuccin, Dracula and Nord</span></div>
+      <div class="fact"><b data-i18n="fact3n">No sign-up</b><span data-i18n="fact3">open the page and start writing; drafts are saved as you type</span></div>
+    </section>
+  </main>
+
+  <section class="section features" id="features" aria-labelledby="features-title">
+    <div class="wrap">
+      <p class="kicker" data-i18n="featKicker">Features</p>
+      <h2 id="features-title" data-i18n="featTitle">Everything a Markdown draft needs. Nothing it doesn't.</h2>
+      <ul class="grid">
+        <li>
+          <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 3 5 14h6l-1 7 8-11h-6l1-7Z"/></svg></span>
+          <h3 data-i18n="f1t">Instant preview</h3>
+          <p data-i18n="f1">Rendering runs in a Web Worker, so even long documents do not freeze the editor.</p>
+        </li>
+        <li>
+          <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M9 10v9"/></svg></span>
+          <h3 data-i18n="f2t">GitHub Flavored Markdown</h3>
+          <p data-i18n="f2">Tables, task lists, strikethrough, autolinks and raw HTML — the way GitHub shows them.</p>
+        </li>
+        <li>
+          <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 12h7M9 16h5"/></svg></span>
+          <h3 data-i18n="f3t">Many drafts, one place</h3>
+          <p data-i18n="f3">A file sidebar, an outline of headings and a resizable split. Open and download real <code>.md</code> files.</p>
+        </li>
+        <li>
+          <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13 6l-2 12"/></svg></span>
+          <h3 data-i18n="f4t">Clean HTML in one click</h3>
+          <p data-i18n="f4">Copy Markdown or sanitized HTML, ready to paste into a CMS, an email or a docs page.</p>
+        </li>
+        <li>
+          <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 9V3h10v6M7 17H4v-7h16v7h-3"/><path d="M7 14h10v7H7z"/></svg></span>
+          <h3 data-i18n="f5t">Print and PDF</h3>
+          <p data-i18n="f5">The preview prints cleanly: use the browser's Save as PDF to share a finished page.</p>
+        </li>
+        <li>
+          <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3"/><path d="M18 3v4h-4M6 21v-4h4"/></svg></span>
+          <h3 data-i18n="f6t">Hard to lose work</h3>
+          <p data-i18n="f6">Autosave, a conflict warning when two tabs edit one draft, and recovery of unsaved edits after a reload.</p>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section look" aria-labelledby="look-title">
+    <div class="wrap">
+      <p class="kicker" data-i18n="lookKicker">The editor</p>
+      <h2 id="look-title" data-i18n="lookTitle">Source and preview, side by side.</h2>
+      <div class="tabs" role="tablist" aria-label="Screenshots" data-i18n-aria="shotsLabel">
+        <button role="tab" id="tab-0" aria-controls="shot" aria-selected="true" data-shot="0" data-i18n="shot0">GitHub Light</button>
+        <button role="tab" id="tab-1" aria-controls="shot" aria-selected="false" tabindex="-1" data-shot="1" data-i18n="shot1">Catppuccin Mocha</button>
+        <button role="tab" id="tab-2" aria-controls="shot" aria-selected="false" tabindex="-1" data-shot="2" data-i18n="shot2">Theme picker</button>
+      </div>
+      <figure class="shot" id="shot" role="tabpanel" aria-labelledby="tab-0">
+        <div class="shot-frame">
+          <img id="shot-img" src="assets/workspace-light.webp" width="1680" height="1000" loading="lazy" alt="The editor in GitHub Light: files and outline on the left, Markdown source in the middle, live preview on the right">
+        </div>
+        <figcaption id="shot-caption" data-i18n="shotCap0">Files and outline on the left, Markdown in the middle, the live preview on the right.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section themes" id="themes" aria-labelledby="themes-title">
+    <div class="wrap themes-grid">
+      <div>
+        <p class="kicker" data-i18n="themesKicker">Color schemes</p>
+        <h2 id="themes-title" data-i18n="themesTitle">Make yourself at home.</h2>
+        <p class="sub" data-i18n="themesSub">The editor ships 19 color schemes for the source and the preview. Pick one here to repaint the demo above; inside the editor, your choice is remembered.</p>
+      </div>
+      <div class="swatches" id="swatches" role="radiogroup" aria-label="Demo color scheme" data-i18n-aria="swatchLabel"></div>
+    </div>
+  </section>
+
+  <section class="section private" id="private" aria-labelledby="private-title">
+    <div class="wrap">
+      <p class="kicker" data-i18n="privKicker">Privacy</p>
+      <h2 id="private-title" data-i18n="privTitle">Your words never leave this browser.</h2>
+      <ol class="pipeline">
+        <li>
+          <span class="step-n">1</span>
+          <h3 data-i18n="p1t">You type</h3>
+          <p data-i18n="p1">CodeMirror edits the source. The page is static files, with no backend to send anything to.</p>
+        </li>
+        <li>
+          <span class="step-n">2</span>
+          <h3 data-i18n="p2t">A worker renders</h3>
+          <p data-i18n="p2">unified and remark turn Markdown into HTML in a background thread.</p>
+        </li>
+        <li>
+          <span class="step-n">3</span>
+          <h3 data-i18n="p3t">DOMPurify cleans</h3>
+          <p data-i18n="p3">Scripts, event handlers, frames, forms and unsafe links are removed before anything is shown.</p>
+        </li>
+        <li>
+          <span class="step-n">4</span>
+          <h3 data-i18n="p4t">IndexedDB keeps</h3>
+          <p data-i18n="p4">Drafts and preferences are saved locally on this device. No analytics, no telemetry.</p>
+        </li>
+      </ol>
+      <div class="note">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.5"/></svg>
+        <p data-i18n="privNote">Local means local: drafts live only in the browser and on the address where you wrote them. Clearing site data deletes them, so download important files as <code>.md</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section final" aria-labelledby="final-title">
+    <div class="wrap final-card">
+      <h2 id="final-title" data-i18n="finalTitle">Start with a heading. Let the rest follow.</h2>
+      <a class="btn btn-primary btn-large" href="editor/" data-i18n="open">Open the editor</a>
+      <p class="final-meta"><a href="https://www.producthunt.com/products/live-markdown-preview" target="_blank" rel="noopener" data-i18n="ph">Featured on Product Hunt ↗</a></p>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <div class="wrap foot-row">
+      <a class="brand" href="#"><img src="assets/icon.svg" width="22" height="22" alt=""><span>Live Markdown Preview</span></a>
+      <nav aria-label="Links" data-i18n-aria="footLabel">
+        <a href="https://github.com/igor-markin/live-markdown-preview" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/igor-markin/live-markdown-preview/issues" target="_blank" rel="noopener" data-i18n="issues">Report a bug</a>
+        <a href="https://github.com/igor-markin/live-markdown-preview/blob/main/LICENSE" target="_blank" rel="noopener" data-i18n="license">MIT license</a>
+        <a href="https://igor-markin.github.io/" data-i18n="author">Made by Igor Markin</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

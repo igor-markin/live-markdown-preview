@@ -2,7 +2,7 @@
 
 **A little space for your ideas.** Write Markdown, watch it take shape, and keep your drafts in your browser.
 
-[Open the editor](https://live-markdown-preview.igor-markin.workers.dev/)
+[Website](https://igor-markin.github.io/live-markdown-preview/) · [Open the editor](https://igor-markin.github.io/live-markdown-preview/editor/)
 
 ![A welcoming Markdown workspace in GitHub Light, with a document outline, editable source, and a live preview of a checklist and weekly plan.](docs/assets/screenshots/workspace-light.png)
 
@@ -73,6 +73,8 @@ The dev server binds to `127.0.0.1`.
 - `npm run dev` starts the Vite dev server.
 - `npm run preview` builds the app and serves it with Wrangler.
 - `npm run build` runs TypeScript checking and builds the app.
+- `npm run build:pages` builds the editor for GitHub Pages into `dist-pages/`.
+- `npm run build:site` builds the editor for GitHub Pages and assembles the full Pages site in `_site/`.
 - `npm test` runs the Vitest suite once.
 - `npm run test:watch` runs Vitest in watch mode.
 - `npm run test:e2e` runs Playwright tests. The `pretest:e2e` script builds the app first.
@@ -89,6 +91,23 @@ npm run test:e2e
 Playwright starts `npm run preview -- --port 4173` at `http://127.0.0.1:4173` and does not reuse an existing server.
 
 ## Deployment
+
+The app has two hosts. Both serve the same editor.
+
+| Host | URL | Source |
+| --- | --- | --- |
+| GitHub Pages | https://igor-markin.github.io/live-markdown-preview/ (website) and `/editor/` (editor) | `.github/workflows/pages.yml` on every push to `main` |
+| Cloudflare Workers | https://live-markdown-preview.igor-markin.workers.dev/ | `npm run deploy` |
+
+Drafts are stored per origin. A draft written on one host is not visible on the other host.
+
+### GitHub Pages
+
+The landing page is static HTML in `site/`. The workflow builds the editor with `vite build --mode pages` (base path `/live-markdown-preview/editor/`, no Cloudflare plugin) and puts it in `editor/` next to the landing page.
+
+GitHub Pages cannot send custom response headers. The Pages build puts the same CSP into a `<meta http-equiv="Content-Security-Policy">` tag and adds a `referrer` meta tag. These protections from `public/_headers` are not available on Pages: `frame-ancestors`, `X-Content-Type-Options`, and `Permissions-Policy`.
+
+### Cloudflare Workers
 
 Cloudflare deployment security headers are defined in `public/_headers`. Vite preview is configured to serve matching security headers locally for e2e coverage.
 
