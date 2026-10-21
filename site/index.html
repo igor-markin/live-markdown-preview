@@ -22,7 +22,7 @@
   <link rel="alternate" hreflang="he" href="https://igor-markin.github.io/live-markdown-preview/?lang=he">
   <script>
     // Apply a saved theme before first paint. Without a saved choice the page follows the OS setting.
-    try { var t = localStorage.getItem('lmp-site-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+    try { var t = localStorage.getItem('site-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
   </script>
   <link rel="stylesheet" href="style.css">
   <script src="app.js" defer></script>
@@ -216,6 +216,7 @@
 
   <section class="author-wrap wrap" aria-labelledby="author-title">
     <div class="author">
+      <img class="author-photo" src="https://igor-markin.github.io/assets/igor-320.webp" width="88" height="88" loading="lazy" alt="Igor Markin">
       <div class="author-text">
         <p class="kicker" data-i18n="auKicker">The author</p>
         <h2 id="author-title" data-i18n="auH">Designed and built by Igor Markin</h2>

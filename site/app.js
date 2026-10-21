@@ -317,7 +317,7 @@
   toggle.addEventListener('click', () => {
     const next = isDark() ? 'light' : 'dark';
     root.dataset.theme = next;
-    store.set('lmp-site-theme', next);
+    store.set('site-theme', next);
     syncThemeToggle();
     // Until the visitor picks a demo scheme, keep the demo on the page theme's default scheme.
     if (!win.style.getPropertyValue('--d-bg')) {
@@ -413,10 +413,10 @@
 
   // Initial language: ?lang=, then the saved choice, otherwise English.
   const param = new URLSearchParams(location.search).get('lang');
-  const saved = store.get('lmp-site-lang');
+  const saved = store.get('site-lang');
   const initial = dict[param] ? param : dict[saved] ? saved : 'en';
   document.querySelectorAll('.lang button').forEach((b) => b.addEventListener('click', () => {
-    store.set('lmp-site-lang', b.dataset.lang);
+    store.set('site-lang', b.dataset.lang);
     applyLang(b.dataset.lang, true);
   }));
   if (dark) currentShot = 1;

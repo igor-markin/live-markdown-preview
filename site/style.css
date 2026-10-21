@@ -282,6 +282,8 @@ h3 { font-size: 18px; letter-spacing: -.01em; }
   background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
   background-size: 32px 32px;
 }
+.author-photo { width: 88px; height: 88px; border-radius: 50%; object-fit: cover; border: 3px solid var(--paper); box-shadow: 0 0 0 1px var(--line); flex: none; }
+.author-text { flex: 1 1 320px; }
 .author h2 { font-size: clamp(24px, 3vw, 32px); margin-top: 12px; }
 .author-text > p:last-child { color: var(--muted); margin-top: 8px; }
 .author-actions { display: flex; flex-wrap: wrap; gap: 12px; }
