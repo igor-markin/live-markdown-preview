@@ -42,7 +42,7 @@
     p4t: 'IndexedDB keeps', p4: 'Drafts and preferences are saved locally on this device. No analytics, no telemetry.',
     privNote: 'Local means local: drafts live only in the browser and on the address where you wrote them. Clearing site data deletes them, so download important files as <code>.md</code>.',
     finalTitle: 'Start with a heading. Let the rest follow.', ph: 'Featured on Product Hunt ↗',
-    footLabel: 'Links', issues: 'Report a bug', license: 'MIT license', author: 'Made by Igor Markin',
+    footLabel: 'Links', issues: 'Report a bug', license: 'MIT license',
     toLight: 'Switch to light theme', toDark: 'Switch to dark theme',
     demo: [
       '# A little space for your ideas',
@@ -106,7 +106,7 @@
     p4t: 'IndexedDB хранит', p4: 'Черновики и настройки сохраняются на этом устройстве. Ни аналитики, ни телеметрии.',
     privNote: 'Локально значит локально: черновики живут только в этом браузере и по тому адресу, где вы их писали. Очистка данных сайта их удалит, поэтому важное скачивайте в <code>.md</code>.',
     finalTitle: 'Начните с заголовка. Остальное приложится.', ph: 'Мы на Product Hunt ↗',
-    footLabel: 'Ссылки', issues: 'Сообщить об ошибке', license: 'Лицензия MIT', author: 'Сделал Игорь Маркин',
+    footLabel: 'Ссылки', issues: 'Сообщить об ошибке', license: 'Лицензия MIT',
     toLight: 'Включить светлую тему', toDark: 'Включить тёмную тему',
     demo: [
       '# Немного места для идей',
@@ -170,7 +170,7 @@
     p4t: 'IndexedDB שומר', p4: 'טיוטות והגדרות נשמרות במכשיר הזה. בלי אנליטיקה ובלי טלמטריה.',
     privNote: 'מקומי זה מקומי: הטיוטות נשמרות רק בדפדפן הזה ורק בכתובת שבה נכתבו. ניקוי נתוני האתר ימחק אותן, לכן כדאי להוריד קבצים חשובים כ-<code>.md</code>.',
     finalTitle: 'מתחילים בכותרת. השאר יבוא.', ph: 'אנחנו ב-Product Hunt ↗',
-    footLabel: 'קישורים', issues: 'דיווח על באג', license: 'רישיון MIT', author: 'נוצר על ידי איגור מרקין',
+    footLabel: 'קישורים', issues: 'דיווח על באג', license: 'רישיון MIT',
     toLight: 'מעבר לערכה בהירה', toDark: 'מעבר לערכה כהה',
     demo: [
       '# קצת מקום לרעיונות',
